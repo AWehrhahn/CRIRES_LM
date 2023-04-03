@@ -421,12 +421,14 @@ with open(sky_extr_sof, "w") as sof:
     sof.writelines(f"{tw_name}\tUTIL_SLIT_CURV_TW\n")
     pass
 
+sky_extr_name = join(outdir, "cr2res_util_combine_sky_extr1D.fits")
 
 # -----------------------------------------------------------------------------
 # Write shell script
 # -----------------------------------------------------------------------------
 # And finally write the file containing esorex reduction commands
 python_cmd_dir = dirname(__file__)
+plot_name = join(outdir, tw_name.replace(".fits", ".png"))
 
 commands = []
 commands += [f"esorex cr2res_cal_dark --bpm_method=GLOBAL {dark_sof}\n"]
@@ -434,6 +436,7 @@ commands += [f"esorex cr2res_util_calib --collapse=MEAN {flat_sof}\n"]
 commands += [f"mv {ff_name} {ff_name_flat}\n"]
 commands += [f"esorex cr2res_util_trace {tw_sof}\n"]
 commands += [f"cr2res_show_trace.py {tw_name} {ff_name_flat}\n"]
+commands += [f"mv {plot_name} {join(outdir, 'cr2res_util_trace.png')}"]
 commands += [f"esorex cr2res_cal_flat {flat_extr_sof}\n"]
 commands += [f"esorex cr2res_util_calib --collapse=MEDIAN {combine_A_sof}\n"]
 commands += [f"mv {ff_name} {ff_name_science_A}\n"]
@@ -441,8 +444,12 @@ commands += [f"esorex cr2res_util_calib --collapse=MEDIAN {combine_B_sof}\n"]
 commands += [f"mv {ff_name} {ff_name_science_B}\n"]
 commands += [f"python {python_cmd_dir}/cr2res_util_combine_sky.py {combine_sky_sof}\n"]
 commands += [f"cr2res_show_trace.py {tw_name} {sky_name}\n"]
+commands += [f"mv {plot_name} {join(outdir, 'cr2res_util_combine.png')}\n"]
 commands += [f"python {python_cmd_dir}/cr2res_util_slit_curv.py {slit_curv_sof}\n"]
-commands += [f"esorex cr2res_util_extract {sky_extr_sof}\n"]
+commands += [f"cr2res_show_trace_curv.py {tw_name} {sky_name}\n"]
+commands += [f"mv {plot_name} {join(outdir, 'cr2res_util_slit_curv.png')}\n"]
+commands += [f"esorex cr2res_util_extract --smooth_spec=0.0001 {sky_extr_sof}\n"]
+commands += [f"python {join(python_cmd_dir, 'cr2res_show_spectrum.py')} {tw_name} {sky_extr_name} -o=cr2res_util_combine_sky_extr1D.png\n"]
 
 with open(shell_script, "a") as ww:
     ww.writelines(commands)
