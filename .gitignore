@@ -130,3 +130,15 @@ dmypy.json
 
 # VS Code workspace
 **/*.code-workspace
+
+# Project files
+src/*.rc
+src/*.sof
+src/*.lin
+src/*.par
+src/*.dat
+src/*.png
+
+
+
+
