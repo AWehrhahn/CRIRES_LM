@@ -95,6 +95,63 @@ from os.path import join, dirname
 
 import argparse
 
+class SofFile:
+    """
+    Handles the 'Set Of Files' data files that are used by esorex.
+    Essentially a list of files and their descriptor that is then used by esorex.
+
+    TODO: the class could be more sophisticated using e.g. a numpy array
+    or even pandas, but that would be overkill for now
+    """
+
+    def __init__(self, data=None):
+        if data is None:
+            data = []
+        #:list: content of the SOF file
+        self.data = data
+
+    @classmethod
+    def read(cls, filename):
+        """
+        Reads a sof file from disk
+
+        Parameters
+        ----------
+        filename : str
+            name of the file to read
+
+        Returns
+        -------
+        self : SofFile
+            The read file
+        """
+        data = []
+        with open(filename, "r") as f:
+            for line in f.readline():
+                fname, ftype = line.split(maxsplit=1)
+                data += [(fname, ftype)]
+        self = cls(data)
+        return self
+
+    def write(self, filename):
+        """
+        Writes the sof file to disk
+
+        Parameters
+        ----------
+        filename : str
+            The name of the file to store
+        """
+        content = []
+        for fname, ftype in self.data:
+            content += [f"{fname} {ftype}\n"]
+
+        with open(filename, "w") as f:
+            f.writelines(content)
+
+    def append(self, filename, tag):
+        self.data += [(filename, tag)]
+
 # -----------------------------------------------------------------------------
 # Settings
 # -----------------------------------------------------------------------------
@@ -268,17 +325,8 @@ matches_flat_settings_mask = np.logical_and(
 
 if np.sum(matches_flat_settings_mask) == 0:
     raise Exception("No darks matching flat exposure and NDIT.")
-else:
-    # Format the flat exposure time so it writes properly. Keep up to 5 decimal
-    # places, or cast to integer if they're the same.
-    # if float(flat_exp) == int(float(flat_exp)):
-    #     flat_exp_str = "{:0.0f}".format(int(float(flat_exp)))
-    # else:
-    #     flat_exp_str = "{:0.5f}".format(float(flat_exp))
 
-    flat_master_dark = join(outdir, "cr2res_cal_dark_master.fits")
-    flat_master_dark_bpm = join(outdir, "cr2res_cal_dark_bpm.fits")
-    flat_master_blaze = join(outdir, "cr2res_cal_flat_Open_blaze.fits")
+
 
 
 # -----------------------------------------------------------------------------
@@ -306,28 +354,24 @@ output, error = process.communicate()
 # Make SOF file for darks. The esorex recipe can do all our darks at once, so
 # we may as well add them all.
 dark_sof = join(outdir, "dark.sof")
+dark_sof_data = SofFile()
+for dark in cal_frames[is_dark]["fn"]:
+    dark_sof_data.append(join(rawdir, dark), "DARK")
+dark_sof_data.write(dark_sof)
 
-with open(dark_sof, "w") as sof:
-    for dark in cal_frames[is_dark]["fn"]:
-        sof.writelines("{}\tDARK\n".format(join(rawdir, dark)))
+master_dark = join(outdir, "cr2res_cal_dark_master.fits")
+master_dark_bpm = join(outdir, "cr2res_cal_dark_bpm.fits")
 
 # -----------------------------------------------------------------------------
 # Write SOF for flats
 # -----------------------------------------------------------------------------
 flat_sof = join(outdir, "flat.sof")
-
-with open(flat_sof, "w") as sof:
-    for flat in cal_frames[is_flat]["fn"]:
-        sof.writelines("{}\tFLAT\n".format(join(rawdir, flat)))
-
-    # sof.writelines("{}\tUTIL_WAVE_TW\n".format(TRACE_WAVE))
-    # if use_detlin:
-    #     sof.writelines("{}\tCAL_DETLIN_COEFFS\n".format(DETLIN_COEFF))
-
-    sof.writelines(f"{flat_master_dark}\tCAL_DARK_MASTER\n")
-
-    if provide_bpm_to_flat:
-        sof.writelines(f"{flat_master_dark_bpm}\tCAL_DARK_BPM\n")
+flat_sof_data = SofFile()
+for flat in cal_frames[is_flat]["fn"]:
+    flat_sof_data.append(join(rawdir, flat), "FLAT")
+flat_sof_data.append(master_dark, "CAL_DARK_MASTER")
+flat_sof_data.append(master_dark_bpm, "CAL_DARK_BPM")
+flat_sof_data.write(flat_sof)
 
 flat_master = join(outdir, "cr2res_cal_flat_Open_master_flat.fits")
 flat_bpm = join(outdir, "cr2res_cal_flat_Open_bpm.fits")
@@ -339,10 +383,9 @@ ff_name_flat = join(outdir, "cr2res_util_calib_flat_collapsed.fits")
 # Write SOF for tracewave
 # -----------------------------------------------------------------------------
 tw_sof = join(outdir, "tracewave.sof")
-
-with open(tw_sof, "w") as sof:
-    sof.writelines(f"{ff_name_flat}\tUTIL_CALIB\n")
-    pass
+tw_sof_data = SofFile()
+tw_sof_data.append(ff_name_flat, "UTIL_CALIB")
+tw_sof_data.write(tw_sof)
 
 tw_name = join(outdir, "cr2res_util_calib_flat_collapsed_tw.fits")
 
@@ -350,27 +393,24 @@ tw_name = join(outdir, "cr2res_util_calib_flat_collapsed_tw.fits")
 # Write SOF for combining the science frames
 # -----------------------------------------------------------------------------
 combine_A_sof = join(outdir, "combine_A.sof")
-with open(combine_A_sof, "w") as sof:
-    for s in science_exps_A:
-        sof.writelines(f"{s}\tOBS_NODDING_OTHER\n")
-
-    sof.writelines(f"{flat_master}\tCAL_FLAT_MASTER\n")
-    sof.writelines(f"{flat_bpm}\tCAL_FLAT_BPM\n")
-    sof.writelines(f"{flat_master_dark}\tCAL_DARK_MASTER\n")
-    # sof.writelines(f"{flat_master_dark_bpm}\tCAL_DARK_BPM\n")
-
+combine_A_sof_data = SofFile()
+for s in science_exps_A:
+    combine_A_sof_data.append(s, "OBS_NODDING_OTHER")
+combine_A_sof_data.append(flat_master, "CAL_FLAT_MASTER")
+combine_A_sof_data.append(flat_bpm, "CAL_FLAT_BPM")
+combine_A_sof_data.append(master_dark, "CAL_DARK_MASTER")
+combine_A_sof_data.write(combine_A_sof)
 
 ff_name_science_A = join(outdir, "cr2res_util_calib_science_A_collapsed.fits")
 
 combine_B_sof = join(outdir, "combine_B.sof")
-with open(combine_B_sof, "w") as sof:
-    for s in science_exps_B:
-        sof.writelines(f"{s}\tOBS_NODDING_OTHER\n")
-
-    sof.writelines(f"{flat_master}\tCAL_FLAT_MASTER\n")
-    sof.writelines(f"{flat_bpm}\tCAL_FLAT_BPM\n")
-    sof.writelines(f"{flat_master_dark}\tCAL_DARK_MASTER\n")
-    # sof.writelines(f"{flat_master_dark_bpm}\tCAL_DARK_BPM\n")
+combine_B_sof_data = SofFile()
+for s in science_exps_B:
+    combine_B_sof_data.append(s, "OBS_NODDING_OTHER")
+combine_B_sof_data.append(flat_master, "CAL_FLAT_MASTER")
+combine_B_sof_data.append(flat_bpm, "CAL_FLAT_BPM")
+combine_B_sof_data.append(master_dark, "CAL_DARK_MASTER")
+combine_B_sof_data.write(combine_A_sof)
 
 ff_name_science_B = join(outdir, "cr2res_util_calib_science_B_collapsed.fits")
 
@@ -378,50 +418,104 @@ ff_name_science_B = join(outdir, "cr2res_util_calib_science_B_collapsed.fits")
 # Write SOF for sky only
 # -----------------------------------------------------------------------------
 combine_sky_sof = join(outdir, "sky.sof")
-
-with open(combine_sky_sof, "w") as sof:
-    sof.writelines(f"{ff_name_science_A}\tUTIL_CALIB\n")
-    sof.writelines(f"{ff_name_science_B}\tUTIL_CALIB\n")
-    sof.writelines(f"{tw_name}\tCAL_FLAT_TW\n")
+combine_sky_sof_data = SofFile()
+combine_sky_sof_data.append(ff_name_science_A, "UTIL_CALIB")
+combine_sky_sof_data.append(ff_name_science_B, "UTIL_CALIB")
+combine_sky_sof_data.append(tw_name, "CAL_FLAT_TW")
+combine_sky_sof_data.write(combine_sky_sof)
 
 sky_name = join(outdir, "cr2res_util_combine_sky.fits")
-
-# -----------------------------------------------------------------------------
-# Write SOF for slit curvature
-# -----------------------------------------------------------------------------
-slit_curv_sof = join(outdir, "slit_curv.sof")
-
-with open(slit_curv_sof, "w") as sof:
-    sof.writelines(f"{tw_name}\tCAL_FLAT_TW\n")
-    sof.writelines(f"{sky_name}\tUTIL_CALIB\n")
-    sof.writelines(f"{flat_master_blaze}\tCAL_FLAT_EXTRACT_1D\n")
 
 # -----------------------------------------------------------------------------
 # Write SOF for flats
 # -----------------------------------------------------------------------------
 flat_extr_sof = join(outdir, "flat_extr.sof")
+flat_extr_sof_data = SofFile()
+for flat in cal_frames[is_flat]["fn"]:
+    flat_extr_sof_data.append(join(rawdir, flat), "FLAT")
+flat_extr_sof_data.append(tw_name, "UTIL_WAVE_TW")
+flat_extr_sof_data.append(master_dark, "CAL_DARK_MASTER")
+flat_extr_sof_data.append(flat_bpm, "CAL_FLAT_BPM")
+flat_extr_sof_data.write(flat_extr_sof)
 
-with open(flat_extr_sof, "w") as sof:
-    for flat in cal_frames[is_flat]["fn"]:
-        sof.writelines("{}\tFLAT\n".format(join(rawdir, flat)))
+flat_master_blaze = join(outdir, "cr2res_cal_flat_Open_blaze.fits")
 
-    sof.writelines(f"{tw_name}\tUTIL_WAVE_TW\n")
-    sof.writelines(f"{flat_master_dark}\tCAL_DARK_MASTER\n")
-    sof.writelines(f"{flat_bpm}\tCAL_FLAT_BPM\n")
-    # if use_detlin:
-    #     sof.writelines("{}\tCAL_DETLIN_COEFFS\n".format(DETLIN_COEFF))
 
 # -----------------------------------------------------------------------------
 # Write SOF for sky extr
 # -----------------------------------------------------------------------------
 sky_extr_sof = join(outdir, "sky_extr.sof")
-
-with open(sky_extr_sof, "w") as sof:
-    sof.writelines(f"{sky_name}\tUTIL_CALIB\n")
-    sof.writelines(f"{tw_name}\tUTIL_SLIT_CURV_TW\n")
-    pass
+sky_extr_sof_data = SofFile()
+sky_extr_sof_data.append(sky_name, "UTIL_CALIB")
+sky_extr_sof_data.append(tw_name, "UTIL_SLIT_CURV_TW")
+sky_extr_sof_data.write(sky_extr_sof)
 
 sky_extr_name = join(outdir, "cr2res_util_combine_sky_extr1D.fits")
+sky_extr_model_name = join(outdir, "cr2res_util_combine_sky_extrModel.fits")
+
+# -----------------------------------------------------------------------------
+# Write SOF for slit curvature
+# -----------------------------------------------------------------------------
+slit_curv_sof = join(outdir, "slit_curv.sof")
+slit_curv_sof_data = SofFile()
+slit_curv_sof_data.append(tw_name, "CAL_FLAT_TW")
+slit_curv_sof_data.append(sky_name, "UTIL_CALIB")
+slit_curv_sof_data.append(flat_master_blaze, "CAL_FLAT_EXTRACT_1D")
+slit_curv_sof_data.append(sky_extr_name, "UTIL_CALIB_EXTRACT_1D")
+slit_curv_sof_data.append(sky_extr_model_name, "UTIL_CALIB_EXTRACT_MODEL")
+slit_curv_sof_data.write(slit_curv_sof)
+
+# -----------------------------------------------------------------------------
+# Write SOF for extraction of the stellar spectrum
+# -----------------------------------------------------------------------------
+extract_star_sof = join(outdir, "extract_stellar.sof")
+extract_star_sof_data = SofFile()
+for s in science_exps_A:
+    extract_star_sof_data.append(s, "OBS_NODDING_OTHER")
+for s in science_exps_B:
+    extract_star_sof_data.append(s, "OBS_NODDING_OTHER")
+extract_star_sof_data.append(tw_name, "CAL_FLAT_TW")
+extract_star_sof_data.append(flat_master, "CAL_FLAT_MASTER")
+extract_star_sof_data.append(flat_bpm, "CAL_FLAT_BPM")
+extract_star_sof_data.append(master_dark, "CAL_DARK_MASTER")
+extract_star_sof_data.write(extract_star_sof)
+
+extract_star = join(outdir, "cr2res_obs_nodding_extracted_combined.fits")
+
+# -----------------------------------------------------------------------------
+# Write SOF for molecfit
+# -----------------------------------------------------------------------------
+molecfit_prepare_sky_sof = join(outdir, "molecfit_sky.sof")
+molecfit_prepare_sof_data = SofFile()
+molecfit_prepare_sof_data.append(sky_extr_name, "UTIL_CALIB_EXTRACT_1D")
+molecfit_prepare_sof_data.append(flat_master_blaze, "CAL_FLAT_EXTRACT_1D")
+molecfit_prepare_sof_data.write(molecfit_prepare_sky_sof)
+
+molecfit_prepare_star_sof = join(outdir, "molecfit_star.sof")
+molecfit_prepare_sof_data = SofFile()
+molecfit_prepare_sof_data.append(extract_star, "UTIL_CALIB_EXTRACT_1D")
+molecfit_prepare_sof_data.append(flat_master_blaze, "CAL_FLAT_EXTRACT_1D")
+molecfit_prepare_sof_data.write(molecfit_prepare_star_sof)
+
+molecfit_model_rc = join(outdir, "molecfit_model.rc")
+molecfit_model_sof = join(outdir, "molecfit_model.sof")
+molecfit_best_model = join(outdir, "BEST_FIT_MODEL.fits")
+molecfit_mapping = join(outdir, "MAPPING.fits")
+
+molecfit_best_model_sky = join(outdir, "BEST_FIT_MODEL_SKY.fits")
+molecfit_mapping_sky = join(outdir, "MAPPING_SKY.fits")
+
+molecfit_best_model_star = join(outdir, "BEST_FIT_MODEL_STAR.fits")
+molecfit_mapping_star = join(outdir, "MAPPING_STAR.fits")
+
+molecfit_apply_sof = join(outdir, "molecfit_apply.sof")
+molecfit_apply_sof_data = SofFile()
+molecfit_apply_sof_data.append(extract_star, "UTIL_CALIB_EXTRACT_1D")
+molecfit_apply_sof_data.append(molecfit_best_model_sky, "CAL_WAVE_MOLECFIT_MODEL_SKY")
+molecfit_apply_sof_data.append(molecfit_mapping_sky, "CAL_WAVE_MOLECFIT_MAPPING_SKY")
+molecfit_apply_sof_data.append(molecfit_best_model_star, "CAL_WAVE_MOLECFIT_MODEL_STAR")
+molecfit_apply_sof_data.append(molecfit_mapping_star, "CAL_WAVE_MOLECFIT_MAPPING_STAR")
+molecfit_apply_sof_data.write(molecfit_apply_sof)
 
 # -----------------------------------------------------------------------------
 # Write shell script
@@ -430,26 +524,54 @@ sky_extr_name = join(outdir, "cr2res_util_combine_sky_extr1D.fits")
 python_cmd_dir = dirname(__file__)
 plot_name = join(outdir, tw_name.replace(".fits", ".png"))
 
-commands = []
-commands += [f"esorex cr2res_cal_dark --bpm_method=GLOBAL {dark_sof}\n"]
-commands += [f"esorex cr2res_util_calib --collapse=MEAN {flat_sof}\n"]
-commands += [f"mv {ff_name} {ff_name_flat}\n"]
-commands += [f"esorex cr2res_util_trace {tw_sof}\n"]
-commands += [f"cr2res_show_trace.py {tw_name} {ff_name_flat}\n"]
-commands += [f"mv {plot_name} {join(outdir, 'cr2res_util_trace.png')}"]
-commands += [f"esorex cr2res_cal_flat {flat_extr_sof}\n"]
-commands += [f"esorex cr2res_util_calib --collapse=MEDIAN {combine_A_sof}\n"]
-commands += [f"mv {ff_name} {ff_name_science_A}\n"]
-commands += [f"esorex cr2res_util_calib --collapse=MEDIAN {combine_B_sof}\n"]
-commands += [f"mv {ff_name} {ff_name_science_B}\n"]
-commands += [f"python {python_cmd_dir}/cr2res_util_combine_sky.py {combine_sky_sof}\n"]
-commands += [f"cr2res_show_trace.py {tw_name} {sky_name}\n"]
-commands += [f"mv {plot_name} {join(outdir, 'cr2res_util_combine.png')}\n"]
-commands += [f"python {python_cmd_dir}/cr2res_util_slit_curv.py {slit_curv_sof}\n"]
-commands += [f"cr2res_show_trace_curv.py {tw_name} {sky_name}\n"]
-commands += [f"mv {plot_name} {join(outdir, 'cr2res_util_slit_curv.png')}\n"]
-commands += [f"esorex cr2res_util_extract --smooth_spec=0.0001 {sky_extr_sof}\n"]
-commands += [f"python {join(python_cmd_dir, 'cr2res_show_spectrum.py')} {tw_name} {sky_extr_name} -o=cr2res_util_combine_sky_extr1D.png\n"]
+esorex = "pyesorex"
+py_recipe_dir = "/home/anwe5599/documents/crires_lm/recipes"
+
+commands = [
+    # Create master dark
+    f"{esorex} cr2res_cal_dark --bpm_method=GLOBAL {dark_sof}\n"
+    # Create an initial trace wave
+    f"{esorex} cr2res_util_calib --collapse=MEAN {flat_sof}\n"
+    f"mv {ff_name} {ff_name_flat}\n"
+    f"{esorex} cr2res_util_trace {tw_sof}\n"
+    f"cr2res_show_trace.py {tw_name} {ff_name_flat}\n"
+    f"mv {plot_name} {join(outdir, 'cr2res_util_trace.png')}"
+    # Create master flat
+    f"{esorex} cr2res_cal_flat {flat_extr_sof}\n"
+    # Combine the observations into a sky only observation
+    f"{esorex} cr2res_util_calib --collapse=MEDIAN {combine_A_sof}\n"
+    f"mv {ff_name} {ff_name_science_A}\n"
+    f"{esorex} cr2res_util_calib --collapse=MEDIAN {combine_B_sof}\n"
+    f"mv {ff_name} {ff_name_science_B}\n"
+    f"{esorex} cr2res_util_combine_sky {combine_sky_sof}\n"
+    f"cr2res_show_trace.py {tw_name} {sky_name}\n"
+    f"mv {plot_name} {join(outdir, 'cr2res_util_combine.png')}\n"
+    # Extract sky spectrum (no curvature)
+    f"{esorex} cr2res_util_extract --smooth_spec=0.0001 {sky_extr_sof}\n"
+    # Determine curvature from sky emissions
+    f"{esorex} cr2res_util_slit_curv_sky {slit_curv_sof}\n"
+    f"cr2res_show_trace_curv.py {tw_name} {sky_name}\n"
+    f"mv {plot_name} {join(outdir, 'cr2res_util_slit_curv.png')}\n"
+    # Extract sky spectrum (with curvature)
+    f"{esorex} cr2res_util_extract --smooth_spec=0.0001 {sky_extr_sof}\n"
+    f"python {join(python_cmd_dir, 'cr2res_show_spectrum.py')} {tw_name} {sky_extr_name} -o=cr2res_util_combine_sky_extr1D.png\n"
+    # Molecfit on sky emission spectrum
+    f"{esorex}  cr2res_wave_molecfit_prepare --transmission=False {molecfit_prepare_sky_sof}\n"
+    f"{esorex} --recipe-config={molecfit_model_rc} molecfit_model {molecfit_model_sof}\n"
+    f"mv {molecfit_mapping} {molecfit_mapping_sky}\n"
+    f"mv {molecfit_best_model} {molecfit_best_model_sky}\n"
+    # Extract stellar spectrum
+    f"{esorex} cr2res_obs_nodding {extract_star_sof}\n"
+    # Molecfit on stellar spectrum
+    f"{esorex} cr2res_wave_molecfit_prepare --transmission=True {molecfit_prepare_star_sof}\n"
+    f"{esorex} --recipe-config={molecfit_model_rc} molecfit_model {molecfit_model_sof}\n"
+    f"mv {molecfit_mapping} {molecfit_mapping_star}\n"
+    f"mv {molecfit_best_model} {molecfit_best_model_star}\n"
+    # Apply the Molecfit wavelength calibration
+    # using the best of the sky and stellar molecfit fits
+    f"{esorex} cr2res_wave_molecfit_apply {molecfit_apply_sof}\n"
+]
+
 
 with open(shell_script, "a") as ww:
     ww.writelines(commands)
