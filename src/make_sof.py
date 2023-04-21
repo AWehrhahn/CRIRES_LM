@@ -91,7 +91,7 @@ import subprocess
 import pandas as pd
 import matplotlib.pyplot as plt
 from astropy.io import fits
-from os.path import join, dirname
+from os.path import join, dirname, realpath
 
 import argparse
 
@@ -161,48 +161,31 @@ if len(sys.argv) > 1:
     parser.add_argument("setting", help="Wavelength setting of CRIRES+")
     parser.add_argument("-r", "--raw", help="Directory with raw data")
     parser.add_argument("-o", "--output", help="Output directory with processed data")
+    parser.add_argument("-e", "--exposure-time", type=int, help="Filter by Exposure Time", default=None)
     args = parser.parse_args()
     wl_setting = args.setting.upper()
     rawdir = args.raw
     outdir = args.output
+    exposure_time = args.exposure_time
 else:
-    wl_setting = "L3262"
-    rawdir = "/scratch/ptah/anwe5599/CRIRES/2022-11-29/raw"
-    outdir = "/scratch/ptah/anwe5599/CRIRES/2022-11-29/extr"
+    day, wl_setting, exposure_time = "2022-11-29", "L3262", 30
+    # day, wl_setting, exposure_time = "2022-12-23", "M4318", 10
+    # day, wl_setting, exposure_time = "2022-12-23", "L3262", 30
+    # day, wl_setting, exposure_time = "2022-12-25", "L3340", 30
+    # day, wl_setting, exposure_time = "2022-12-31", "L3426", 60
+    # day, wl_setting, exposure_time = "2023-01-22", "M4318", 10
+    # day, wl_setting, exposure_time = "2023-02-15", "L3340", 60
+    # day, wl_setting, exposure_time = "2023-02-25", "M4318", 10 # Bad Seeing?
+    # day, wl_setting, exposure_time = "2023-02-26", "L3262", 60 # High PWV
+
+    rawdir = f"/scratch/ptah/anwe5599/CRIRES/{day}_{wl_setting}/raw"
+    outdir = f"/scratch/ptah/anwe5599/CRIRES/{day}_{wl_setting}/extr"
 
 os.makedirs(outdir, exist_ok=True)
-
-# Static calibration files
-CAL_FOLDER = "/home/anwe5599/esotools/cr2re-calib-1.2.3/cal"
-TRACE_WAVE = "{}/{}_tw.fits".format(CAL_FOLDER, wl_setting)
-# DETLIN_COEFF = "/home/tom/pCOMM/cr2res_cal_detlin_coeffs.fits"
-
-# Reduction parameters
-BPM_KAPPA = 1000  # Default: -1, controls bad pixel threshold
-BPM_LOW = 0.5  # Default: 0.8, controls *relative* bad pixel threshold
-BPM_HIGH = 2.0  # Default: 1.2, controls *relative* bad pixel threshold
-
-# Detector linearity is computed from a series of flats with a range of NDIT in
-# three different grating settings to illuminate all pixels. This process takes
-# around ~8 hours and the resulting calibration file has SNR~200. Note that for
-# science files with SNR significantly above this, the linearisation process
-# will actually *degrade* the data quality. Linearity is primarily a concern
-# for science cases where one is interested in the relative depths of
-# absorption features rather than their locations (i.e. an abundance analysis
-# would suffer more than a simply cross correlation). The use of detlin is
-# *not* recommended for calibration frames.
-use_detlin = False
-
-# Whether to provide a BPM to the flat field routine. Since we by default are
-# not making use of the BPM computed from the darks, there is no point in
-# providing the dark BPM to the flats.
-provide_bpm_to_flat = True
 
 # -----------------------------------------------------------------------------
 # Read in files
 # -----------------------------------------------------------------------------
-# Get current working directory
-# cwd = os.getcwd()
 
 # Get a list of just the calibration files
 fits_fns = glob.glob(join(rawdir, "CRIRE.*.fits"))
@@ -217,6 +200,10 @@ ndits = []
 nod = []
 
 cal_frames_kinds = ["FLAT", "DARK", "bet Pic"]
+
+# settings = set([fits.getheader(fn).get("HIERARCH ESO INS WLEN ID") for fn in fits_fns])
+# if None in settings:
+#     settings.remove(None)
 
 # Populate our columns
 for fn in fits_fns:
@@ -257,8 +244,12 @@ cal_frames.sort_values(by="fn", inplace=True)
 is_flat = cal_frames["object"] == "FLAT"
 is_dark = cal_frames["object"] == "DARK"
 is_science = cal_frames["object"] == "bet Pic"
-is_science_A = is_science & (cal_frames["nod"] == "A") & (cal_frames["exp"] == 30)
-is_science_B = is_science & (cal_frames["nod"] == "B") & (cal_frames["exp"] == 30)
+is_science_A = is_science & (cal_frames["nod"] == "A")
+is_science_B = is_science & (cal_frames["nod"] == "B")
+if exposure_time is not None:
+    is_science_A &= cal_frames["exp"] == exposure_time
+    is_science_B &= cal_frames["exp"] == exposure_time
+
 
 
 # We should have a complete set of calibration frames
@@ -270,6 +261,10 @@ elif np.sum(is_science_A) == 0:
     raise FileNotFoundError("Missing nodding position A frames")
 elif np.sum(is_science_B) == 0:
     raise FileNotFoundError("Missing nodding position B frames")
+elif np.sum(is_science_A) % 2 != 0:
+    raise ValueError("Requiring an even number of A positions")
+elif np.sum(is_science_B) % 2 != 0:
+    raise ValueError("Requiring an even number of B positions")
 
 science_exps_A = cal_frames[is_science_A]["fn"]
 science_exps_B = cal_frames[is_science_B]["fn"]
@@ -329,24 +324,7 @@ if np.sum(matches_flat_settings_mask) == 0:
 
 
 
-# -----------------------------------------------------------------------------
-# Initialise new shell script
-# -----------------------------------------------------------------------------
-# Before we start looping, archive the old reduce.sh script if it exists
-shell_script = join(outdir, "reduce_cals.sh")
 
-if os.path.isfile(shell_script):
-    bashCommand = "mv {} {}.old".format(shell_script, shell_script)
-    process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE)
-    output, error = process.communicate()
-
-# And make a new splice script
-with open(shell_script, "w") as rs:
-    rs.write("#!/bin/bash\n")
-
-cmd = "chmod +x {}".format(shell_script)
-process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
-output, error = process.communicate()
 
 # -----------------------------------------------------------------------------
 # Write SOF file for darks
@@ -410,7 +388,7 @@ for s in science_exps_B:
 combine_B_sof_data.append(flat_master, "CAL_FLAT_MASTER")
 combine_B_sof_data.append(flat_bpm, "CAL_FLAT_BPM")
 combine_B_sof_data.append(master_dark, "CAL_DARK_MASTER")
-combine_B_sof_data.write(combine_A_sof)
+combine_B_sof_data.write(combine_B_sof)
 
 ff_name_science_B = join(outdir, "cr2res_util_calib_science_B_collapsed.fits")
 
@@ -435,7 +413,7 @@ for flat in cal_frames[is_flat]["fn"]:
     flat_extr_sof_data.append(join(rawdir, flat), "FLAT")
 flat_extr_sof_data.append(tw_name, "UTIL_WAVE_TW")
 flat_extr_sof_data.append(master_dark, "CAL_DARK_MASTER")
-flat_extr_sof_data.append(flat_bpm, "CAL_FLAT_BPM")
+flat_extr_sof_data.append(master_dark_bpm, "CAL_DARK_BPM")
 flat_extr_sof_data.write(flat_extr_sof)
 
 flat_master_blaze = join(outdir, "cr2res_cal_flat_Open_blaze.fits")
@@ -520,14 +498,20 @@ molecfit_apply_sof_data.write(molecfit_apply_sof)
 # -----------------------------------------------------------------------------
 # Write shell script
 # -----------------------------------------------------------------------------
+
+
 # And finally write the file containing esorex reduction commands
-python_cmd_dir = dirname(__file__)
+python_cmd_dir = realpath(join(dirname(__file__), "..", "tools"))
 plot_name = join(outdir, tw_name.replace(".fits", ".png"))
 
-esorex = "pyesorex"
-py_recipe_dir = "/home/anwe5599/documents/crires_lm/recipes"
+# Molecfit does not work with pyesorex
+# So only use pyesorex for python recipes
+esorex = "esorex"
+pyesorex = "pyesorex"
+
 
 commands = [
+    "#!/bin/bash\n"
     # Create master dark
     f"{esorex} cr2res_cal_dark --bpm_method=GLOBAL {dark_sof}\n"
     # Create an initial trace wave
@@ -535,7 +519,7 @@ commands = [
     f"mv {ff_name} {ff_name_flat}\n"
     f"{esorex} cr2res_util_trace {tw_sof}\n"
     f"cr2res_show_trace.py {tw_name} {ff_name_flat}\n"
-    f"mv {plot_name} {join(outdir, 'cr2res_util_trace.png')}"
+    f"mv {plot_name} {join(outdir, 'cr2res_util_trace.png')}\n"
     # Create master flat
     f"{esorex} cr2res_cal_flat {flat_extr_sof}\n"
     # Combine the observations into a sky only observation
@@ -543,37 +527,45 @@ commands = [
     f"mv {ff_name} {ff_name_science_A}\n"
     f"{esorex} cr2res_util_calib --collapse=MEDIAN {combine_B_sof}\n"
     f"mv {ff_name} {ff_name_science_B}\n"
-    f"{esorex} cr2res_util_combine_sky {combine_sky_sof}\n"
+    f"{pyesorex} cr2res_util_combine_sky {combine_sky_sof}\n"
     f"cr2res_show_trace.py {tw_name} {sky_name}\n"
     f"mv {plot_name} {join(outdir, 'cr2res_util_combine.png')}\n"
     # Extract sky spectrum (no curvature)
     f"{esorex} cr2res_util_extract --smooth_spec=0.0001 {sky_extr_sof}\n"
     # Determine curvature from sky emissions
-    f"{esorex} cr2res_util_slit_curv_sky {slit_curv_sof}\n"
+    f"{pyesorex} cr2res_util_slit_curv_sky {slit_curv_sof}\n"
     f"cr2res_show_trace_curv.py {tw_name} {sky_name}\n"
     f"mv {plot_name} {join(outdir, 'cr2res_util_slit_curv.png')}\n"
     # Extract sky spectrum (with curvature)
     f"{esorex} cr2res_util_extract --smooth_spec=0.0001 {sky_extr_sof}\n"
-    f"python {join(python_cmd_dir, 'cr2res_show_spectrum.py')} {tw_name} {sky_extr_name} -o=cr2res_util_combine_sky_extr1D.png\n"
+    f"python {join(python_cmd_dir, 'cr2res_show_spectrum.py')} {tw_name} {sky_extr_name} -o={join(outdir, 'cr2res_util_combine_sky_extr1D.png')}\n"
     # Molecfit on sky emission spectrum
-    f"{esorex}  cr2res_wave_molecfit_prepare --transmission=False {molecfit_prepare_sky_sof}\n"
+    f"{pyesorex}  cr2res_wave_molecfit_prepare --transmission=False {molecfit_prepare_sky_sof}\n"
     f"{esorex} --recipe-config={molecfit_model_rc} molecfit_model {molecfit_model_sof}\n"
     f"mv {molecfit_mapping} {molecfit_mapping_sky}\n"
     f"mv {molecfit_best_model} {molecfit_best_model_sky}\n"
     # Extract stellar spectrum
     f"{esorex} cr2res_obs_nodding {extract_star_sof}\n"
     # Molecfit on stellar spectrum
-    f"{esorex} cr2res_wave_molecfit_prepare --transmission=True {molecfit_prepare_star_sof}\n"
+    f"{pyesorex} cr2res_wave_molecfit_prepare --transmission=True {molecfit_prepare_star_sof}\n"
     f"{esorex} --recipe-config={molecfit_model_rc} molecfit_model {molecfit_model_sof}\n"
     f"mv {molecfit_mapping} {molecfit_mapping_star}\n"
     f"mv {molecfit_best_model} {molecfit_best_model_star}\n"
+    f"python {join(python_cmd_dir, 'cr2res_show_molecfit.py')} -e={sky_extr_name} --mfsk={molecfit_best_model_sky} --mpsk={molecfit_mapping_sky} --mfst={molecfit_best_model_star} --mpst={molecfit_mapping_sky}\n"
     # Apply the Molecfit wavelength calibration
     # using the best of the sky and stellar molecfit fits
-    f"{esorex} cr2res_wave_molecfit_apply {molecfit_apply_sof}\n"
+    f"{pyesorex} cr2res_wave_molecfit_apply {molecfit_apply_sof}\n"
 ]
 
+shell_script = join(outdir, "reduce_cals.sh")
+print(f"Creating data reduction script : {shell_script}")
 
-with open(shell_script, "a") as ww:
+with open(shell_script, "w") as ww:
     ww.writelines(commands)
+
+# Make the script executable
+cmd = "chmod +x {}".format(shell_script)
+process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
+output, error = process.communicate()
 
 pass

@@ -23,8 +23,8 @@ if len(sys.argv) > 1:
 else:
     sof = "/scratch/ptah/anwe5599/CRIRES/2022-11-29/extr/molecfit.sof"
     output_dir = "/scratch/ptah/anwe5599/CRIRES/2022-11-29/extr"
-    use_chip = 1
-    use_order = [2, 3, 4, 5, 6]
+    use_chip = None
+    use_order = None
 
 mf = Molecfit(
     recipe_dir="/home/anwe5599/esotools/lib/esopipes-plugins",

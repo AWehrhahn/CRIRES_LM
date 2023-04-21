@@ -250,13 +250,14 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
             ext = get_chip_extension(chip)
             data = spectrum[ext].data
             dblaze = blaze[ext].data
-
             columns = data.names
+
             orders = np.sort([int(c[:2]) for c in columns if c[-4:] == "SPEC"])
 
             for order in orders:
                 # Division but avoiding zero blaze elements
                 # So we dont get a warning message
+
                 ftmp = np.full_like(data[f"{order:02}_01_SPEC"], np.nan)
                 np.divide(data[f"{order:02}_01_SPEC"], dblaze[f"{order:02}_01_SPEC"], where=dblaze[f"{order:02}_01_SPEC"] != 0, out=ftmp)
                 flux += [ftmp]
@@ -305,15 +306,15 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
             mask = np.isfinite(flux[i])
             coef = np.polyfit(x[mask], flux[i, mask], 1)
             cont = np.polyval(coef, x)
-            flux[i] -= cont
+            flux[i] /= cont
 
             # Second step, only use the bottom half of the points
             mask &= flux[i] < np.nanmedian(flux[i])
             coef = np.polyfit(x[mask], flux[i, mask], 1)
             cont = np.polyval(coef, x)
-            flux[i] -= cont
+            flux[i] /= cont
 
-            flux[i] -= np.nanpercentile(flux[i], 1)
+            # flux[i] -= np.nanpercentile(flux[i], 1)
             flux[i, flux[i] < 0] = np.nan
             err[i, np.isnan(flux[i])] = 0
 
@@ -427,12 +428,26 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
 
         # Normalize the input spectrum
         wave, flux, err, mapping = self.load_data(spectrum, blaze)
+
         if transmission:
             flux, err = self.normalize_spectrum_star(flux, err)
         else:
             flux, err = self.normalize_spectrum_sky(flux, err)
         # Convert the wavelength in micron for Molecfit
         wave *= 0.001
+
+        # Remove a strong line in the spectrum of this order
+        # This of course depends on the wavelength setting used
+        # TODO: customize this for all settings used here (if required)
+        wl_set = header["ESO INS WLEN ID"]
+        if wl_set == "L3262":
+            idx = mapping["MOLECFIT"][(mapping["CHIP"] == 2) & (mapping["ORDER"] == 3)][0] - 1
+            flux[idx][-100:] = 0
+            err[idx][-100:] = 0
+
+            idx = mapping["MOLECFIT"][(mapping["CHIP"] == 3) & (mapping["ORDER"] == 2)][0] - 1
+            flux[idx][-100:] = 0
+            err[idx][-100:] = 0
 
         # Initialize the recipe parameters
         molecules = ["H2O", "CH4", "N2O"]
@@ -447,22 +462,24 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
         esorex.recipe_parameters["TRANSMISSION"] = transmission
         esorex.recipe_parameters["USE_INPUT_KERNEL"] = False
         esorex.recipe_parameters["VARKERN"] = True
-        esorex.recipe_parameters["FIT_RES_BOX"] = False
-        esorex.recipe_parameters["RES_BOX"] = 0
-        esorex.recipe_parameters["FIT_RES_GAUSS"] = False
-        esorex.recipe_parameters["RES_GAUSS"] = 10
-        esorex.recipe_parameters["FIT_RES_LORENTZ"] = False
-        esorex.recipe_parameters["RES_LORENTZ"] = 0
         esorex.recipe_parameters["FIT_CONTINUUM"] = "1"
         esorex.recipe_parameters["CONTINUUM_N"] = "0"
         esorex.recipe_parameters["FIT_WLC"] = "1"
         esorex.recipe_parameters["WLC_N"] = 1
+        esorex.recipe_parameters["WLC_CONST"] = 0
         esorex.recipe_parameters["LIST_MOLEC"] = ",".join(molecules)
         esorex.recipe_parameters["REL_COL"] = ",".join(["1"] * len(molecules))
         esorex.recipe_parameters["FIT_MOLEC"] = ",".join(["1"] * len(molecules))
-        if transmission:      
-            esorex.recipe_parameters["CONTINUUM_CONST"] = 2e-9
-            esorex.recipe_parameters["TELESCOPE_BACKGROUND_CONST"] = 0.06
+        # if not transmission:      
+        #     esorex.recipe_parameters["CONTINUUM_CONST"] = 2e-9
+        #     esorex.recipe_parameters["TELESCOPE_BACKGROUND_CONST"] = 0.06
+        #     esorex.recipe_parameters["FIT_RES_BOX"] = False
+        #     esorex.recipe_parameters["RES_BOX"] = 0
+        #     esorex.recipe_parameters["FIT_RES_GAUSS"] = False
+        #     esorex.recipe_parameters["RES_GAUSS"] = 10
+        #     esorex.recipe_parameters["FIT_RES_LORENTZ"] = False
+        #     esorex.recipe_parameters["RES_LORENTZ"] = 0
+
 
         # Since we modifed the flux and wavelength we need to write the data to a new datafile
         header = spectrum[0].header
