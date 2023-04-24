@@ -7,7 +7,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("tracewave")
     parser.add_argument("extract")
-    parser.add_argument("-o", "--output")
+    parser.add_argument("-o", "--out")
     args = parser.parse_args()
 
     tw_fname = args.tracewave
@@ -34,7 +34,7 @@ if __name__ == "__main__":
             spec = extr_data[f"{order:02}_01_SPEC"]
             spec -= spec[10:-10].min()
             spec /= spec[10:-10].max()
-            ax.plot(spec + order - orders[0])
+            ax.plot(spec + order - orders[0], lw=0.1)
 
     fig.subplots_adjust(wspace=0)
-    fig.savefig(output, dpi=600)
+    fig.savefig(output, dpi=1200)

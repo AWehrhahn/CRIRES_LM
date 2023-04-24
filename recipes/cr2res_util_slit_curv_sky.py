@@ -364,7 +364,7 @@ class cr2res_util_slit_curv_sky(PyRecipe):
 
         return result
 
-    def determine_slit_curvature(self, trace_wave, science, blaze, extracted, model):
+    def determine_slit_curvature(self, trace_wave, science, extracted, model):
         tilts = []
         shears = []
 
@@ -375,7 +375,7 @@ class cr2res_util_slit_curv_sky(PyRecipe):
             tw_data = trace_wave[ext].data
             data = science[ext].data
             err = science[exterr].data
-            blaze_data = blaze[ext].data
+            # blaze_data = blaze[ext].data
             extract_data = extracted[ext].data
             model_data = model[ext].data
 
@@ -430,8 +430,8 @@ class cr2res_util_slit_curv_sky(PyRecipe):
                 data[idx_data[0][~mask], idx_data[1][~mask]] = np.nan
 
                 # Correct for the blaze
-                blaze_spec = blaze_data[get_spectrum_table_header(order, 1, "SPEC")]
-                spectrum[i] /= blaze_spec
+                # blaze_spec = blaze_data[get_spectrum_table_header(order, 1, "SPEC")]
+                # spectrum[i] /= blaze_spec
                 spectrum[i][np.isnan(spectrum[i])] = 0
 
                 # Smooth spectrum for easier peak detection
@@ -498,7 +498,7 @@ class cr2res_util_slit_curv_sky(PyRecipe):
             frameset,
             science="UTIL_CALIB",
             trace_wave="CAL_FLAT_TW",
-            blaze="CAL_FLAT_EXTRACT_1D",
+            # blaze="CAL_FLAT_EXTRACT_1D",
             spectrum="UTIL_CALIB_EXTRACT_1D",
             model="UTIL_CALIB_EXTRACT_MODEL",
         )
@@ -508,8 +508,8 @@ class cr2res_util_slit_curv_sky(PyRecipe):
             raise ValueError("Expected exactly 1 science frame")
         if len(frames["trace_wave"]) != 1:
             raise ValueError("Expected exactly 1 trace wave frame")
-        if len(frames["blaze"]) != 1:
-            raise ValueError("Expected exactly 1 blaze frame")
+        # if len(frames["blaze"]) != 1:
+        #     raise ValueError("Expected exactly 1 blaze frame")
         if len(frames["spectrum"]) != 1:
             raise ValueError("Expected exactly 1 spectrum frame")
         if len(frames["model"]) != 1:
@@ -518,18 +518,13 @@ class cr2res_util_slit_curv_sky(PyRecipe):
         # Run the actual work
         trace_wave = frames["trace_wave"][0].as_hdulist()
         science = frames["science"][0].as_hdulist()
-        blaze = frames["blaze"][0].as_hdulist()
+        # blaze = frames["blaze"][0].as_hdulist()
         spectrum = frames["spectrum"][0].as_hdulist()
         model = frames["model"][0].as_hdulist()
 
-
-        print("TEST1")
-
         trace_wave = self.determine_slit_curvature(
-            trace_wave, science, blaze, spectrum, model
+            trace_wave, science, spectrum, model
         )
-
-        print("TEST2")
 
         # Save the results
         outfile = basename(frames["trace_wave"][0].file)

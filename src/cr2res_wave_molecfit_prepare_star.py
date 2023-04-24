@@ -21,8 +21,8 @@ if len(sys.argv) > 1:
     use_chip = None
     use_order = None
 else:
-    sof = "/scratch/ptah/anwe5599/CRIRES/2022-11-29/extr/molecfit_star.sof"
-    output_dir = "/scratch/ptah/anwe5599/CRIRES/2022-11-29/extr"
+    sof = "/scratch/ptah/anwe5599/CRIRES/2022-11-29_L3262/extr/molecfit_star.sof"
+    output_dir = "/scratch/ptah/anwe5599/CRIRES/2022-11-29_L3262/extr"
     use_chip = 1
     use_order = None
 
@@ -130,6 +130,7 @@ for j, chip in enumerate(chips):
         mapping[i + j*norders]["MOLECFIT"] = i + j * norders + 1
 
 flux[flux == 0] = np.nan
+flux[~np.isfinite(flux)] = np.nan
 # quick normalization
 flux -= np.nanmin(flux, axis=1)[:, None]
 

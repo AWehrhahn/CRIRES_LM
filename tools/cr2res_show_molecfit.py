@@ -76,7 +76,7 @@ for chip in tqdm(chips):
         plt.plot(mf_wave_sky[mask_sky], mf_spec_sky[mask_sky], "--", label="Model")
         plt.legend()
         plt.suptitle(f"CHIP: {chip} ORDER: {order:02}")
-        plt.savefig(f"molecfit_c{chip}_o{order:02}.png", dpi=600)
+        plt.savefig(f"cr2res_wave_molecfit_c{chip}_o{order:02}.png", dpi=600)
 
         pass
 

@@ -5,6 +5,7 @@ from astropy.io import fits
 from cpl.core import Msg
 from cpl.ui import Frame, FrameSet, ParameterList, ParameterValue, PyRecipe
 from pyesorex.pyesorex import Pyesorex
+from scipy.interpolate import interp1d
 
 
 def get_chip_extension(chip: int, error: bool = False) -> str:
@@ -274,8 +275,7 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
         mapping = np.rec.fromrecords(mapping, names="CHIP,ORDER,MOLECFIT")
         return wave, flux, err, mapping
 
-    def normalize_spectrum_star(self, flux, err):
-        flux[flux == 0] = np.nan
+    def normalize_spectrum_star(self, wave, flux, err):
         # quick normalization
         flux -= np.nanmin(flux, axis=1)[:, None]
 
@@ -292,11 +292,11 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
             mask = np.isnan(flux[i])
             flux[i, mask] = np.interp(x[mask], x[~mask], flux[i, ~mask])
             err[i, mask] = np.interp(x[mask], x[~mask], err[i, ~mask])
+
         return flux, err
 
-    def normalize_spectrum_sky(self, flux, err):
-        # quick normalization
-        flux[flux == 0] = np.nan
+    def normalize_spectrum_sky(self, wave, flux, err):
+        # Quick normalization        
         flux -= np.nanmin(flux, axis=1)[:, None]
 
         # further normalization with a linear fit
@@ -429,12 +429,40 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
         # Normalize the input spectrum
         wave, flux, err, mapping = self.load_data(spectrum, blaze)
 
+        # Fix the wavelength scale
+        x = np.arange(wave.shape[1])
+        for i in range(len(wave)):
+            order = mapping["ORDER"][i]
+            lower = header[f"ESO INS WLEN MIN{order}"]
+            upper = header[f"ESO INS WLEN MAX{order}"]
+            mask = (~np.isfinite(wave[i])) | (wave[i] <= lower) | (wave[i] >= upper)
+            wave[i, mask] = np.polyval(np.polyfit(x[~mask], wave[i, ~mask], 1), x[mask])
+
+        flux[(~np.isfinite(flux))] = np.nan
+        flux[(~np.isfinite(wave)) | (wave <= 0)] = np.nan
+        flux[(~np.isfinite(err)) | (err <= 0)] = np.nan
+
+        # Remove the edges of the orders
+        # As they are badly reduced
+        # and often contain outliers
+        left, right = 20, 20
+        for i in range(len(flux)):
+            flux[i][:left] = np.nan
+            err[i][:left] = np.nan
+            flux[i][-right:] = np.nan
+            err[i][-right:] = np.nan
+
         if transmission:
-            flux, err = self.normalize_spectrum_star(flux, err)
+            flux, err = self.normalize_spectrum_star(wave, flux, err)
         else:
-            flux, err = self.normalize_spectrum_sky(flux, err)
-        # Convert the wavelength in micron for Molecfit
-        wave *= 0.001
+            flux, err = self.normalize_spectrum_sky(wave, flux, err)
+
+        # Ensure errors are 0 when necessary
+        err[flux <= 0] = 0
+        err[~np.isfinite(err)] = 0
+        for i in range(len(flux)):
+            err[i][:left] = 0
+            err[i][-right:] = 0
 
         # Remove a strong line in the spectrum of this order
         # This of course depends on the wavelength setting used
@@ -449,6 +477,9 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
             flux[idx][-100:] = 0
             err[idx][-100:] = 0
 
+        # Convert the wavelength in micron for Molecfit
+        wave *= 0.001
+
         # Initialize the recipe parameters
         molecules = ["H2O", "CH4", "N2O"]
         esorex = Pyesorex()
@@ -457,6 +488,8 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
         esorex.recipe_parameters["COLUMN_LAMBDA"] = "WAVE"
         esorex.recipe_parameters["COLUMN_FLUX"] = "FLUX"
         esorex.recipe_parameters["COLUMN_DFLUX"] = "ERR"
+        esorex.recipe_parameters["SILENT_EXTERNAL_BINS"] = False
+
         esorex.recipe_parameters["WLG_TO_MICRON"] = 1
         esorex.recipe_parameters["PIX_SCALE_VALUE"] = 0.056
         esorex.recipe_parameters["TRANSMISSION"] = transmission
@@ -470,16 +503,17 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
         esorex.recipe_parameters["LIST_MOLEC"] = ",".join(molecules)
         esorex.recipe_parameters["REL_COL"] = ",".join(["1"] * len(molecules))
         esorex.recipe_parameters["FIT_MOLEC"] = ",".join(["1"] * len(molecules))
+        # Fix the broadening
+        esorex.recipe_parameters["FIT_RES_BOX"] = False
+        esorex.recipe_parameters["RES_BOX"] = 0
+        esorex.recipe_parameters["FIT_RES_GAUSS"] = False
+        esorex.recipe_parameters["RES_GAUSS"] = 10
+        esorex.recipe_parameters["FIT_RES_LORENTZ"] = False
+        esorex.recipe_parameters["RES_LORENTZ"] = 0
+
         # if not transmission:      
         #     esorex.recipe_parameters["CONTINUUM_CONST"] = 2e-9
         #     esorex.recipe_parameters["TELESCOPE_BACKGROUND_CONST"] = 0.06
-        #     esorex.recipe_parameters["FIT_RES_BOX"] = False
-        #     esorex.recipe_parameters["RES_BOX"] = 0
-        #     esorex.recipe_parameters["FIT_RES_GAUSS"] = False
-        #     esorex.recipe_parameters["RES_GAUSS"] = 10
-        #     esorex.recipe_parameters["FIT_RES_LORENTZ"] = False
-        #     esorex.recipe_parameters["RES_LORENTZ"] = 0
-
 
         # Since we modifed the flux and wavelength we need to write the data to a new datafile
         header = spectrum[0].header
@@ -498,10 +532,10 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
                 wmin * esorex.recipe_parameters["WLG_TO_MICRON"].value,
                 wmax * esorex.recipe_parameters["WLG_TO_MICRON"].value,
             )
-            wave_include += [f"{wmin:.5},{wmax:.5}"]
-        wave_include = ",".join(wave_include)
+            wave_include += [wmin, wmax]
 
-        nseg = len(wave_include.split(",")) // 2
+        nseg = len(wave_include) // 2
+        wave_include = ",".join([f"{w:.5}" for w in wave_include])
         esorex.recipe_parameters["WAVE_INCLUDE"] = wave_include
         esorex.recipe_parameters["MAP_REGIONS_TO_CHIP"] = ",".join(
             [str(i) for i in range(1, nseg + 1)]

@@ -352,43 +352,43 @@ class cr2res_wave_molecfit_apply(PyRecipe):
                 xs += [np.arange(len(zs[-1]))]
                 os += [order]
 
-            xsr = np.asarray(xs).ravel()
-            ysr = np.asarray(ys).ravel()
-            zsr = np.asarray(zs).ravel()
-            mask = zs != 0
-            xsr, ysr, zsr = xsr[mask], ysr[mask], zsr[mask]
-            coef = polyfit2d(xsr, ysr, zsr, degree=(2, 3), plot=f"cr2res_wave_molecfit_plot_chip{chip}_2D.html", plot_title=f"CHIP {chip}")
-            ws = polyval2d(xs, ys, coef)
+            # xsr = np.asarray(xs).ravel()
+            # ysr = np.asarray(ys).ravel()
+            # zsr = np.asarray(zs).ravel()
+            # mask = zs != 0
+            # xsr, ysr, zsr = xsr[mask], ysr[mask], zsr[mask]
+            # coef = polyfit2d(xsr, ysr, zsr, degree=(2, 3), max_degree=3, plot=f"cr2res_wave_molecfit_plot_chip{chip}_2D.html", plot_title=f"CHIP {chip}")
+            # ws = polyval2d(xs, ys, coef)
 
-            for i, order in enumerate(orders):
-                idx = (mapping["CHIP"] == chip) & (mapping["ORDER"] == order)
-                idx = mapping[idx]["MOLECFIT"][0]
+            # for i, order in enumerate(orders):
+            #     idx = (mapping["CHIP"] == chip) & (mapping["ORDER"] == order)
+            #     idx = mapping[idx]["MOLECFIT"][0]
 
-                wave_star = model_star[model_star["CHIP"] == idx]["MLAMBDA"] * 1000
-                mask_star = wave_star != 0
-                spec_star = model_star[model_star["CHIP"] == idx]["MFLUX"]
-                extr_star = model_star[model_star["CHIP"] == idx]["FLUX"]
+            #     wave_star = model_star[model_star["CHIP"] == idx]["MLAMBDA"] * 1000
+            #     mask_star = wave_star != 0
+            #     spec_star = model_star[model_star["CHIP"] == idx]["MFLUX"]
+            #     extr_star = model_star[model_star["CHIP"] == idx]["FLUX"]
 
-                wave_sky = model_sky[model_sky["CHIP"] == idx]["MLAMBDA"] * 1000
-                mask_sky = wave_sky != 0
-                spec_sky = model_sky[model_sky["CHIP"] == idx]["MFLUX"]
-                extr_sky = model_sky[model_sky["CHIP"] == idx]["FLUX"]
-                plt.clf()
-                plt.subplot(211)
-                plt.title("STAR")
-                plt.plot(wave_star[mask_star], extr_star[mask_star], label="Extracted")
-                plt.plot(wave_star[mask_star], spec_star[mask_star], "--", label="Model")
-                plt.plot(ws[i], extr_star, label="Corrected")
+            #     wave_sky = model_sky[model_sky["CHIP"] == idx]["MLAMBDA"] * 1000
+            #     mask_sky = wave_sky != 0
+            #     spec_sky = model_sky[model_sky["CHIP"] == idx]["MFLUX"]
+            #     extr_sky = model_sky[model_sky["CHIP"] == idx]["FLUX"]
+            #     plt.clf()
+            #     plt.subplot(211)
+            #     plt.title("STAR")
+            #     plt.plot(wave_star[mask_star], extr_star[mask_star], label="Extracted")
+            #     plt.plot(wave_star[mask_star], spec_star[mask_star], "--", label="Model")
+            #     plt.plot(ws[i], extr_star, label="Corrected")
 
-                plt.subplot(212)
-                plt.title("SKY")
-                plt.plot(wave_sky[mask_sky], extr_sky[mask_sky], label="Extracted")
-                plt.plot(wave_sky[mask_sky], spec_sky[mask_sky], "--", label="Model")
-                plt.plot(ws[i], extr_sky, label="Corrected")
+            #     plt.subplot(212)
+            #     plt.title("SKY")
+            #     plt.plot(wave_sky[mask_sky], extr_sky[mask_sky], label="Extracted")
+            #     plt.plot(wave_sky[mask_sky], spec_sky[mask_sky], "--", label="Model")
+            #     plt.plot(ws[i], extr_sky, label="Corrected")
 
-                plt.legend()
-                plt.suptitle(f"CHIP: {chip} ORDER: {order:02}")
-                plt.savefig(f"cr2res_wave_molecfit_apply_c{chip}_o{order:02}.png", dpi=600)
+            #     plt.legend()
+            #     plt.suptitle(f"CHIP: {chip} ORDER: {order:02}")
+            #     plt.savefig(f"cr2res_wave_molecfit_apply_c{chip}_o{order:02}.png", dpi=600)
 
         # Overwrite the results
         spectrum.writeto(basename(spectrum_fname), overwrite=True)
