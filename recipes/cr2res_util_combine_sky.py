@@ -1,3 +1,5 @@
+import sys
+from os.path import dirname
 from typing import Any, Dict
 
 import numpy as np
@@ -6,60 +8,11 @@ from cpl.core import Msg
 from cpl.ui import Frame, FrameSet, ParameterList, ParameterValue, PyRecipe
 from tqdm import tqdm
 
+sys.path.append(dirname(__file__))
+from cr2res_recipe import CR2RES_RECIPE
 
-def get_chip_extension(chip: int, error: bool = False) -> str:
-    if error:
-        return f"CHIP{chip}ERR.INT1"
-    else:
-        return f"CHIP{chip}.INT1"
 
-def make_index(ymin, ymax, xmin, xmax, zero=0):
-    """Create an index (numpy style) that will select part of an image with changing position but fixed height
-    The user is responsible for making sure the height is constant, otherwise it will still work, but the subsection will not have the desired format
-    Parameters
-    ----------
-    ymin : array[ncol](int)
-        lower y border
-    ymax : array[ncol](int)
-        upper y border
-    xmin : int
-        leftmost column
-    xmax : int
-        rightmost colum
-    zero : bool, optional
-        if True count y array from 0 instead of xmin (default: False)
-    Returns
-    -------
-    index : tuple(array[height, width], array[height, width])
-        numpy index for the selection of a subsection of an image
-    """
-
-    # TODO
-    # Define the indices for the pixels between two y arrays, e.g. pixels in an order
-    # in x: the rows between ymin and ymax
-    # in y: the column, but n times to match the x index
-    ymin = np.asarray(ymin, dtype=int)
-    ymax = np.asarray(ymax, dtype=int)
-    xmin = int(xmin)
-    xmax = int(xmax)
-
-    if zero:
-        zero = xmin
-
-    index_x = np.array(
-        [np.arange(ymin[col], ymax[col] + 1) for col in range(xmin - zero, xmax - zero)]
-    )
-    index_y = np.array(
-        [
-            np.full(ymax[col] - ymin[col] + 1, col)
-            for col in range(xmin - zero, xmax - zero)
-        ]
-    )
-    index = index_x.T, index_y.T + zero
-
-    return index
-
-class cr2res_util_combine_sky(PyRecipe):
+class cr2res_util_combine_sky(PyRecipe, CR2RES_RECIPE):
     _name = "cr2res_util_combine_sky"
     _version = "1.0"
     _author = "Ansgar Wehrhahn"
@@ -91,88 +44,53 @@ class cr2res_util_combine_sky(PyRecipe):
     def combine_frames(self, trace_wave, science_A, science_B):
         hdus = [science_A[0]]
 
-        for chip in tqdm([1, 2, 3], desc="CHIP"):
-            ext = get_chip_extension(chip)
-            exterr = get_chip_extension(chip, error=True)
-            tw_data = trace_wave[ext].data
+        with self.redirect_stdout_tqdm() as stdout:
+            for chip in tqdm([1, 2, 3], desc="CHIP", file=stdout, dynamic_ncols=True):
+                ext = self.get_chip_extension(chip)
+                exterr = self.get_chip_extension(chip, error=True)
+                tw_data = trace_wave[ext].data
 
-            header = science_A[ext].header
-            data_A = science_A[ext].data
-            data_B = science_B[ext].data
-            err_header = science_A[exterr].header
-            err_A = science_A[exterr].data
-            err_B = science_B[exterr].data
+                header = science_A[ext].header
+                data_A = science_A[ext].data
+                data_B = science_B[ext].data
+                err_header = science_A[exterr].header
+                err_A = science_A[exterr].data
+                err_B = science_B[exterr].data
 
-            result = np.copy(data_A)
-            result_error = np.copy(err_A)
+                result = np.copy(data_A)
+                result_error = np.copy(err_A)
 
-            for order in tqdm(set(tw_data["Order"]), desc="Order"):
-                idx = tw_data["Order"] == order
-                x = np.arange(1, 2049)
-                upper = np.polyval(tw_data[idx]["Upper"][0][::-1], x)
-                lower = np.polyval(tw_data[idx]["Lower"][0][::-1], x)
-                middle = np.polyval(tw_data[idx]["All"][0][::-1], x)
+                for order in tqdm(set(tw_data["Order"]), desc="Order", file=stdout, dynamic_ncols=True):
+                    lower, middle, upper = self.get_order_trace(tw_data, order)
+                    idx = self.make_index(middle, upper)
+                    result[idx] = data_A[idx]
+                    result_error[idx] = err_A[idx]
+                    idx = self.make_index(lower, middle)
+                    result[idx] = data_B[idx]
+                    result_error[idx] = err_B[idx]
 
-                height_upp = int(np.ceil(np.max(upper - middle)))
-                height_low = int(np.ceil(np.max(middle - lower)))
-
-                middle_int = middle.astype(int)
-                upper_int = middle_int + height_upp
-                lower_int = middle_int - height_low
-
-                idx = make_index(middle_int, upper_int, 0, 2048)
-                result[idx] = data_A[idx]
-                result_error[idx] = err_A[idx]
-                idx = make_index(lower_int, middle_int, 0, 2048)
-                result[idx] = data_B[idx]
-                result_error[idx] = err_B[idx]
-
-            secondary = fits.ImageHDU(result, header=header)
-            err_secondary = fits.ImageHDU(result_error, header=err_header)
-            hdus += [secondary, err_secondary]
+                secondary = fits.ImageHDU(result, header=header)
+                err_secondary = fits.ImageHDU(result_error, header=err_header)
+                hdus += [secondary, err_secondary]
 
         hdus = fits.HDUList(hdus)
         return hdus
 
     def run(self, frameset: FrameSet, settings: Dict[str, Any]) -> FrameSet:
         # Check the input parameters
-        for key, value in settings.items():
-            try:
-                self.parameters[key].value = value
-            except KeyError:
-                Msg.warning(
-                    self.name,
-                    f"Settings includes {key}:{value} but {self} has no parameter named {key}.",
-                )
+        self.parameters = self.parse_parameters(settings)
 
         # Parse the SOF
-        science_frames = FrameSet()
-        trace_wave_frames = FrameSet()
-        # Go through the list of input frames, check the tag and act accordingly
-        for frame in frameset:
-            if frame.tag == "UTIL_CALIB":
-                frame.group = Frame.FrameGroup.RAW
-                science_frames.append(frame)
-                Msg.debug(self.name, f"Got UTIL_CALIB frame: {frame.file}.")
-            elif frame.tag == "CAL_FLAT_TW":
-                frame.group = Frame.FrameGroup.CALIB
-                trace_wave_frames.append(frame)
-                Msg.debug(self.name, f"Got TRACE_WAVE frame: {frame.file}.")
-            else:
-                Msg.warning(
-                    self.name,
-                    f"Got frame {frame.file!r} with unexpected tag {frame.tag!r}, ignoring.",
-                )
+        frames = self.filter_frameset(frameset, science="UTIL_CALIB", tracewave="CAL_FLAT_TW", validate=False)
+        
 
         # Validate the input
-        if len(science_frames) != 2:
+        if len(frames["science"]) != 2:
             raise ValueError("Expected exactly 2 frames to combine")
-        if len(trace_wave_frames) == 0:
+        if len(frames["tracewave"]) != 1:
             raise ValueError("Expected one trace wave frame")
-        elif len(trace_wave_frames) >= 2:
-            raise ValueError("Expected only one trace wave frame")
 
-        science = [f.as_hdulist() for f in science_frames]
+        science = [f.as_hdulist() for f in frames["science"]]
         offset = [sci[0].header["ESO SEQ CUMOFFSETY"] for sci in science]  # in pixels
 
         if offset[0] * offset[1] >= 0:
@@ -182,7 +100,7 @@ class cr2res_util_combine_sky(PyRecipe):
         # B is negative offset
         science_A = [sci for sci, off in zip(science, offset) if off > 0][0]
         science_B = [sci for sci, off in zip(science, offset) if off < 0][0]
-        trace_wave = trace_wave_frames[0].as_hdulist()
+        trace_wave = frames["tracewave"][0].as_hdulist()
 
         # Run the actual work
         hdus = self.combine_frames(trace_wave, science_A, science_B)
@@ -194,3 +112,9 @@ class cr2res_util_combine_sky(PyRecipe):
         # Return data back to PyEsorex
         fs = FrameSet([Frame(outfile, tag="UTIL_CALIB"),])
         return fs
+
+if __name__ == "__main__":
+    module = cr2res_util_combine_sky()
+    frameset = FrameSet("/scratch/ptah/anwe5599/CRIRES/2022-12-23_M4318/extr/sky.sof")
+    settings = {}
+    module.run(frameset, settings)

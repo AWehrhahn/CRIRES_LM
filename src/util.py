@@ -1,7 +1,15 @@
+from typing import Any, Dict, List, Union
+
 import numpy as np
 from scipy.optimize import least_squares
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import contextlib
+from tqdm import tqdm
+import sys
+from tqdm.contrib import DummyTqdmFile
+from cpl.core import Msg
+from cpl.ui import FrameSet, Frame, ParameterValue, PyRecipe
 
 
 def extend_orders(orders, nrow):
@@ -260,11 +268,13 @@ def polyfit2d(x, y, z, degree=1, x0=None, loss="arctan", method="trf", plot=Fals
         plt.show()
     return coef
 
+
 def get_chip_extension(chip: int, error: bool = False) -> str:
     if error:
         return f"CHIP{chip}ERR.INT1"
     else:
         return f"CHIP{chip}.INT1"
+
 
 def make_index(ymin, ymax, xmin, xmax, zero=0):
     """Create an index (numpy style) that will select part of an image with changing position but fixed height
@@ -311,3 +321,34 @@ def make_index(ymin, ymax, xmin, xmax, zero=0):
     index = index_x.T, index_y.T + zero
 
     return index
+
+
+def get_order_trace(trace_wave, order):
+    idx = trace_wave["Order"] == order
+    x = np.arange(1, 2049)
+    upper = np.polyval(trace_wave[idx]["Upper"][0][::-1], x)
+    lower = np.polyval(trace_wave[idx]["Lower"][0][::-1], x)
+    middle = np.polyval(trace_wave[idx]["All"][0][::-1], x)
+
+    height_upp = int(np.ceil(np.min(upper - middle)))
+    height_low = int(np.ceil(np.min(middle - lower)))
+
+    middle_int = middle.astype(int)
+    upper_int = middle_int + height_upp
+    lower_int = middle_int - height_low
+    return lower_int, middle_int, upper_int
+
+
+@contextlib.contextmanager
+def std_out_err_redirect_tqdm():
+    orig_out_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout, sys.stderr = map(DummyTqdmFile, orig_out_err)
+        yield orig_out_err[0]
+    # Relay exceptions
+    except Exception as exc:
+        raise exc
+    # Always restore sys.stdout/err if necessary
+    finally:
+        sys.stdout, sys.stderr = orig_out_err
+

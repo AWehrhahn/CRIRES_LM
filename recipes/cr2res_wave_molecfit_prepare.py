@@ -1,3 +1,5 @@
+import sys
+from os.path import dirname
 from typing import Any, Dict
 
 import numpy as np
@@ -5,18 +7,9 @@ from astropy.io import fits
 from cpl.core import Msg
 from cpl.ui import Frame, FrameSet, ParameterList, ParameterValue, PyRecipe
 from pyesorex.pyesorex import Pyesorex
-from scipy.interpolate import interp1d
 
-
-def get_chip_extension(chip: int, error: bool = False) -> str:
-    if error:
-        return f"CHIP{chip}ERR.INT1"
-    else:
-        return f"CHIP{chip}.INT1"
-
-
-def get_spectrum_table_header(order: int, trace: int, column: str) -> str:
-    return f"{order:02}_{trace:02}_{column}"
+sys.path.append(dirname(__file__))
+from cr2res_recipe import CR2RES_RECIPE
 
 
 def save_frameset(frameset, filename):
@@ -173,7 +166,7 @@ class RecipeConfig(dict):
             options += [f"--{key.upper()}={value}"]
         return options
 
-class cr2res_wave_molecfit_prepare(PyRecipe):
+class cr2res_wave_molecfit_prepare(PyRecipe, CR2RES_RECIPE):
     _name = "cr2res_wave_molecfit_prepare"
     _version = "1.0"
     _author = "Ansgar Wehrhahn"
@@ -207,37 +200,6 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
             ]
         )
 
-    def parse_parameters(self, settings):
-        for key, value in settings.items():
-            try:
-                self.parameters[key].value = value
-            except KeyError:
-                Msg.warning(
-                    self.name,
-                    f"Settings includes {key}:{value} but {self} has no parameter named {key}.",
-                )
-
-    def filter_frameset(self, frameset: FrameSet, **tags) -> Dict[str, FrameSet]:
-        result = {}
-
-        for frame in frameset:
-            found = False
-            for key, value in tags.items():
-                if frame.tag == value:
-                    if key not in result.keys():
-                        result[key] = FrameSet()
-                    result[key].append(frame)
-                    found = True
-                    Msg.debug(self.name, f"Got {value} frame: {frame.file}.")
-                    break
-            if not found:
-                Msg.warning(
-                    self.name,
-                    f"Got frame {frame.file!r} with unexpected tag {frame.tag!r}, ignoring.",
-                )
-
-        return result
-
     def load_data(self, spectrum, blaze):
         # Read the data from all chips into one big array
         flux = []
@@ -248,7 +210,7 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
         mapping = []
         k = 0
         for chip in [1, 2, 3]:
-            ext = get_chip_extension(chip)
+            ext = self.get_chip_extension(chip)
             data = spectrum[ext].data
             dblaze = blaze[ext].data
             columns = data.names
@@ -258,12 +220,15 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
             for order in orders:
                 # Division but avoiding zero blaze elements
                 # So we dont get a warning message
+                col = self.get_table_column(order, 1, "SPEC")
+                col_wl = self.get_table_column(order, 1, "WL")
+                col_err = self.get_table_column(order, 1, "ERR")
 
-                ftmp = np.full_like(data[f"{order:02}_01_SPEC"], np.nan)
-                np.divide(data[f"{order:02}_01_SPEC"], dblaze[f"{order:02}_01_SPEC"], where=dblaze[f"{order:02}_01_SPEC"] != 0, out=ftmp)
+                ftmp = np.full_like(data[col], np.nan)
+                np.divide(data[col], dblaze[col], where=dblaze[col] != 0, out=ftmp)
                 flux += [ftmp]
-                wave += [data[f"{order:02}_01_WL"]]
-                err += [data[f"{order:02}_01_ERR"]]
+                wave += [data[col_wl]]
+                err += [data[col_err]]
                 k += 1
                 mapping += [
                     [chip, order, k],
@@ -277,27 +242,29 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
 
     def normalize_spectrum_star(self, wave, flux, err):
         # quick normalization
-        flux -= np.nanmin(flux, axis=1)[:, None]
+        flux -= np.nanpercentile(flux, 1, axis=1)[:, None]
 
         x = np.arange(flux.shape[1])
         for i in range(len(flux)):
             # First step, just linear
             mask = np.isfinite(flux[i])
-            factor = np.max(flux[i][mask])
+            factor = np.nanpercentile(flux[i][mask], 99)
             flux[i] /= factor
             err[i] /= factor
+            flux[i, flux[i] < 0] = np.nan
+            err[i, np.isnan(flux[i])] = 0
 
         x = np.arange(flux.shape[1])
         for i in range(len(flux)):
             mask = np.isnan(flux[i])
-            flux[i, mask] = np.interp(x[mask], x[~mask], flux[i, ~mask])
-            err[i, mask] = np.interp(x[mask], x[~mask], err[i, ~mask])
+            flux[i, mask] = np.interp(x[mask], x[~mask], flux[i, ~mask], left=1, right=1)
+            err[i, mask] = np.interp(x[mask], x[~mask], err[i, ~mask], left=0, right=0)
 
         return flux, err
 
     def normalize_spectrum_sky(self, wave, flux, err):
-        # Quick normalization        
-        flux -= np.nanmin(flux, axis=1)[:, None]
+        # Quick normalization
+        flux -= np.nanpercentile(flux, 1, axis=1)[:, None]
 
         # further normalization with a linear fit
         x = np.arange(flux.shape[1])
@@ -306,13 +273,13 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
             mask = np.isfinite(flux[i])
             coef = np.polyfit(x[mask], flux[i, mask], 1)
             cont = np.polyval(coef, x)
-            flux[i] /= cont
+            flux[i] -= cont
 
             # Second step, only use the bottom half of the points
             mask &= flux[i] < np.nanmedian(flux[i])
             coef = np.polyfit(x[mask], flux[i, mask], 1)
             cont = np.polyval(coef, x)
-            flux[i] /= cont
+            flux[i] -= cont
 
             # flux[i] -= np.nanpercentile(flux[i], 1)
             flux[i, flux[i] < 0] = np.nan
@@ -322,8 +289,8 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
         x = np.arange(flux.shape[1])
         for i in range(len(flux)):
             mask = np.isnan(flux[i])
-            flux[i, mask] = np.interp(x[mask], x[~mask], flux[i, ~mask])
-            err[i, mask] = np.interp(x[mask], x[~mask], err[i, ~mask])
+            flux[i, mask] = np.interp(x[mask], x[~mask], flux[i, ~mask], left=0, right=0)
+            err[i, mask] = np.interp(x[mask], x[~mask], err[i, ~mask], left=0, right=0)
 
         return flux, err
 
@@ -405,31 +372,23 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
         return thdulist, mapping
 
     def run(self, frameset: FrameSet, settings: Dict[str, Any]) -> FrameSet:
-
         # Check the input parameters
-        self.parse_parameters(settings)
+        self.parameters = self.parse_parameters(settings)
+        transmission = bool(self.parameters["transmission"].value)
 
         # sort the frames by type
         frames = self.filter_frameset(
             frameset, spectrum="UTIL_CALIB_EXTRACT_1D", blaze="CAL_FLAT_EXTRACT_1D"
         )
-        # Check that the frames exist
-        if len(frames["spectrum"]) != 1:
-            raise ValueError("Expected exactly 1 spectrum frame")
-        if len(frames["blaze"]) != 1:
-            raise ValueError("Expected exactly 1 blaze frame")
+
         # Load the data
         spectrum = frames["spectrum"][0].as_hdulist()
         blaze = frames["blaze"][0].as_hdulist()
         header = spectrum[0].header
-
-        # Parse the input parameter
-        transmission = bool(self.parameters["transmission"].value)
-
         # Normalize the input spectrum
         wave, flux, err, mapping = self.load_data(spectrum, blaze)
 
-        # Fix the wavelength scale
+        # Fix the wavelength scale using the expected wavelength range
         x = np.arange(wave.shape[1])
         for i in range(len(wave)):
             order = mapping["ORDER"][i]
@@ -469,6 +428,10 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
         # TODO: customize this for all settings used here (if required)
         wl_set = header["ESO INS WLEN ID"]
         if wl_set == "L3262":
+            if not transmission:
+                idx = mapping["MOLECFIT"][(mapping["CHIP"] == 2) & (mapping["ORDER"] == 3)][0] - 1
+                flux[idx][1024-500:1024+500] = 0
+        
             idx = mapping["MOLECFIT"][(mapping["CHIP"] == 2) & (mapping["ORDER"] == 3)][0] - 1
             flux[idx][-100:] = 0
             err[idx][-100:] = 0
@@ -476,6 +439,10 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
             idx = mapping["MOLECFIT"][(mapping["CHIP"] == 3) & (mapping["ORDER"] == 2)][0] - 1
             flux[idx][-100:] = 0
             err[idx][-100:] = 0
+        if wl_set == "L3340":
+            if not transmission:
+                idx = mapping["MOLECFIT"][(mapping["CHIP"] == 2) & (mapping["ORDER"] == 2)][0] - 1
+                flux[idx][1500:] = 0
 
         # Convert the wavelength in micron for Molecfit
         wave *= 0.001
@@ -510,10 +477,6 @@ class cr2res_wave_molecfit_prepare(PyRecipe):
         esorex.recipe_parameters["RES_GAUSS"] = 10
         esorex.recipe_parameters["FIT_RES_LORENTZ"] = False
         esorex.recipe_parameters["RES_LORENTZ"] = 0
-
-        # if not transmission:      
-        #     esorex.recipe_parameters["CONTINUUM_CONST"] = 2e-9
-        #     esorex.recipe_parameters["TELESCOPE_BACKGROUND_CONST"] = 0.06
 
         # Since we modifed the flux and wavelength we need to write the data to a new datafile
         header = spectrum[0].header

@@ -1,6 +1,8 @@
-from os.path import basename
+import sys
+from os.path import basename, dirname
 from typing import Any, Dict
 
+import matplotlib.pyplot as plt
 import numpy as np
 from cpl.core import Msg
 from cpl.ui import Frame, FrameSet, ParameterList, ParameterValue, PyRecipe
@@ -10,6 +12,9 @@ from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 from scipy.optimize import least_squares
 from tqdm import tqdm
+
+sys.path.append(dirname(__file__))
+from cr2res_recipe import CR2RES_RECIPE
 
 
 def extend_orders(orders, nrow):
@@ -248,65 +253,8 @@ def polyfit2d(x, y, z, degree=1, x0=None, loss="arctan", method="trf"):
     return coef
 
 
-def make_index(ymin, ymax, xmin, xmax, zero=0):
-    """Create an index (numpy style) that will select part of an image with changing position but fixed height
-    The user is responsible for making sure the height is constant, otherwise it will still work, but the subsection will not have the desired format
-    Parameters
-    ----------
-    ymin : array[ncol](int)
-        lower y border
-    ymax : array[ncol](int)
-        upper y border
-    xmin : int
-        leftmost column
-    xmax : int
-        rightmost colum
-    zero : bool, optional
-        if True count y array from 0 instead of xmin (default: False)
-    Returns
-    -------
-    index : tuple(array[height, width], array[height, width])
-        numpy index for the selection of a subsection of an image
-    """
 
-    # TODO
-    # Define the indices for the pixels between two y arrays, e.g. pixels in an order
-    # in x: the rows between ymin and ymax
-    # in y: the column, but n times to match the x index
-    ymin = np.asarray(ymin, dtype=int)
-    ymax = np.asarray(ymax, dtype=int)
-    xmin = int(xmin)
-    xmax = int(xmax)
-
-    if zero:
-        zero = xmin
-
-    index_x = np.array(
-        [np.arange(ymin[col], ymax[col] + 1) for col in range(xmin - zero, xmax - zero)]
-    )
-    index_y = np.array(
-        [
-            np.full(ymax[col] - ymin[col] + 1, col)
-            for col in range(xmin - zero, xmax - zero)
-        ]
-    )
-    index = index_x.T, index_y.T + zero
-
-    return index
-
-
-def get_chip_extension(chip: int, error: bool = False) -> str:
-    if error:
-        return f"CHIP{chip}ERR.INT1"
-    else:
-        return f"CHIP{chip}.INT1"
-
-
-def get_spectrum_table_header(order: int, trace: int, column: str) -> str:
-    return f"{order:02}_{trace:02}_{column}"
-
-
-class cr2res_util_slit_curv_sky(PyRecipe):
+class cr2res_util_slit_curv_sky(PyRecipe, CR2RES_RECIPE):
     _name = "cr2res_util_slit_curv_sky"
     _version = "1.0"
     _author = "Ansgar Wehrhahn"
@@ -343,41 +291,23 @@ class cr2res_util_slit_curv_sky(PyRecipe):
             ]
         )
 
-    def filter_frameset(self, frameset: FrameSet, **tags) -> Dict[str, FrameSet]:
-        result = {}
 
-        for frame in frameset:
-            found = False
-            for key, value in tags.items():
-                if frame.tag == value:
-                    if key not in result.keys():
-                        result[key] = FrameSet()
-                    result[key].append(frame)
-                    found = True
-                    Msg.debug(self.name, f"Got {value} frame: {frame.file}.")
-                    break
-            if not found:
-                Msg.warning(
-                    self.name,
-                    f"Got frame {frame.file!r} with unexpected tag {frame.tag!r}, ignoring.",
-                )
-
-        return result
-
-    def determine_slit_curvature(self, trace_wave, science, extracted, model):
+    def determine_slit_curvature(self, trace_wave, science, extracted, bpm=None):
         tilts = []
         shears = []
 
         for chip in [1, 2, 3]:
-            ext = get_chip_extension(chip)
-            exterr = get_chip_extension(chip, error=True)
+            ext = self.get_chip_extension(chip)
+            exterr = self.get_chip_extension(chip, error=True)
 
             tw_data = trace_wave[ext].data
             data = science[ext].data
             err = science[exterr].data
             # blaze_data = blaze[ext].data
             extract_data = extracted[ext].data
-            model_data = model[ext].data
+            if bpm is not None:
+                bpm_data = bpm[ext].data != 0
+                data[bpm_data] = np.nan
 
             order_traces = []
             extraction_width = []
@@ -388,19 +318,12 @@ class cr2res_util_slit_curv_sky(PyRecipe):
             xsize = len(extract_data)
 
             for order in orders:
+                lower, middle, upper = self.get_order_trace(tw_data, order)
+                upper_ycen += [upper]
+                lower_ycen += [lower]
+                height_upp = int(np.ceil(np.min(upper - middle)))
+                height_low = int(np.ceil(np.min(middle - lower)))
                 idx = tw_data["Order"] == order
-                x = np.arange(1, xsize + 1)
-                upper = np.polyval(tw_data[idx]["Upper"][0][::-1], x)
-                lower = np.polyval(tw_data[idx]["Lower"][0][::-1], x)
-                middle = np.polyval(tw_data[idx]["All"][0][::-1], x)
-
-                height_upp = int(np.ceil(np.max(upper - middle)))
-                height_low = int(np.ceil(np.max(middle - lower)))
-
-                middle_int = middle.astype(int)
-                upper_ycen += [middle_int + height_upp]
-                lower_ycen += [middle_int - height_low]
-
                 order_traces += [tw_data[idx]["All"][0][::-1]]
                 column_range += [[10, xsize - 10]]
                 extraction_width += [[height_upp, height_low]]
@@ -411,36 +334,20 @@ class cr2res_util_slit_curv_sky(PyRecipe):
 
             spectrum = np.array(
                 [
-                    extract_data[get_spectrum_table_header(order, 1, "SPEC")]
+                    extract_data[self.get_table_column(order, 1, "SPEC")]
                     for order in orders
                 ]
             )
 
-
             for i, order in enumerate(orders):
-                # Reject outliers
-                idx_data = make_index(lower_ycen[i], upper_ycen[i], 0, xsize)
-                relative = data[idx_data] - model_data[idx_data]
-                mask = np.isfinite(relative)
-                std = 1.5 * np.median(
-                    np.abs(np.median(relative[mask]) - relative[mask])
-                )
-                mask &= np.abs(relative) < 10 * std
-                # Need complex indexing to actually set the values to nan
-                data[idx_data[0][~mask], idx_data[1][~mask]] = np.nan
-
-                # Correct for the blaze
-                # blaze_spec = blaze_data[get_spectrum_table_header(order, 1, "SPEC")]
-                # spectrum[i] /= blaze_spec
-                spectrum[i][np.isnan(spectrum[i])] = 0
-
                 # Smooth spectrum for easier peak detection
+                spectrum[i][np.isnan(spectrum[i])] = 0
                 spectrum[i] = gaussian_filter1d(spectrum[i], 3)
-
                 # Limit the size of the extraction width
                 # to avoid the interorder area
                 extraction_width[i, 0] -= 10
                 extraction_width[i, 1] -= 10
+
 
             order_range = (0, order_traces.shape[0])
             data = np.ma.array(data, mask=~np.isfinite(data))
@@ -451,6 +358,8 @@ class cr2res_util_slit_curv_sky(PyRecipe):
                 extraction_width,
                 column_range,
                 order_range,
+                chip=chip,
+                order_nrs=orders
             )
 
             tilts.append(tilt)
@@ -458,7 +367,7 @@ class cr2res_util_slit_curv_sky(PyRecipe):
 
         # Create output
         for chip in [1, 2, 3]:
-            ext = get_chip_extension(chip)
+            ext = self.get_chip_extension(chip)
             tw_data = trace_wave[ext].data
             orders = np.sort(list(set(tw_data["Order"])))
             x = np.arange(1, 2048 + 1)
@@ -485,45 +394,36 @@ class cr2res_util_slit_curv_sky(PyRecipe):
 
     def run(self, frameset: FrameSet, settings: Dict[str, Any]) -> FrameSet:
         # Check the input parameters
-        for key, value in settings.items():
-            try:
-                self.parameters[key].value = value
-            except KeyError:
-                Msg.warning(
-                    self.name,
-                    f"Settings includes {key}:{value} but {self} has no parameter named {key}.",
-                )
+        self.parameters = self.parse_parameters(settings)
 
         frames = self.filter_frameset(
             frameset,
             science="UTIL_CALIB",
             trace_wave="CAL_FLAT_TW",
-            # blaze="CAL_FLAT_EXTRACT_1D",
             spectrum="UTIL_CALIB_EXTRACT_1D",
-            model="UTIL_CALIB_EXTRACT_MODEL",
+            bpm="CAL_DARK_BPM",
+            validate=False
         )
-
         # Validate the input
         if len(frames["science"]) != 1:
             raise ValueError("Expected exactly 1 science frame")
         if len(frames["trace_wave"]) != 1:
             raise ValueError("Expected exactly 1 trace wave frame")
-        # if len(frames["blaze"]) != 1:
-        #     raise ValueError("Expected exactly 1 blaze frame")
         if len(frames["spectrum"]) != 1:
             raise ValueError("Expected exactly 1 spectrum frame")
-        if len(frames["model"]) != 1:
-            raise ValueError("Expected exactly 1 model frame")
 
         # Run the actual work
         trace_wave = frames["trace_wave"][0].as_hdulist()
         science = frames["science"][0].as_hdulist()
-        # blaze = frames["blaze"][0].as_hdulist()
         spectrum = frames["spectrum"][0].as_hdulist()
-        model = frames["model"][0].as_hdulist()
+        if len(frames["bpm"]) >= 1:
+            bpm = frames["bpm"][0].as_hdulist()
+        else:
+            bpm = None
+
 
         trace_wave = self.determine_slit_curvature(
-            trace_wave, science, spectrum, model
+            trace_wave, science, spectrum, bpm
         )
 
         # Save the results
@@ -575,7 +475,8 @@ class cr2res_util_slit_curv_sky(PyRecipe):
         return vec, peaks
 
     def _determine_curvature_single_line(
-        self, original, extracted, peak, ycen, ycen_int, xwd
+        self, original, extracted, peak, ycen, ycen_int, xwd,
+        chip=0, order=0, npeak=0
     ):
         """
         Fit the curvature of a single peak in the spectrum
@@ -614,7 +515,7 @@ class cr2res_util_slit_curv_sky(PyRecipe):
         y = np.arange(-xwd[0], xwd[1] + 1)[:, None] - ycen[xmin:xmax][None, :]
 
         x = x[None, :]
-        idx = make_index(ycen_int - xwd[0], ycen_int + xwd[1], xmin, xmax)
+        idx = self.make_index(ycen_int - xwd[0], ycen_int + xwd[1], xmin, xmax)
         img = original[idx]
         img_compressed = np.ma.compressed(img)
 
@@ -624,8 +525,9 @@ class cr2res_util_slit_curv_sky(PyRecipe):
         img /= img_max - img_min
         # img = np.ma.clip(img, 0, 1)
 
-        sl = np.ma.mean(img, axis=1)
-        sl = sl[:, None]
+        # sl = np.ma.mean(img, axis=1)
+        # sl = sl[:, None]
+        sl = np.full(ncol, 1)
         sp = extracted
         sp -= sp[xmin:xmax].min()
         sp /= sp[xmin:xmax].max()
@@ -645,11 +547,11 @@ class cr2res_util_slit_curv_sky(PyRecipe):
                 mod = peak_func(x, A, mu, sig)
             elif self.peak_function in ["spectrum"]:
                 mod = peak_func(x, A, sp, sp_x - peak, mu)
-            # mod *= sl
-            return (mod - img).ravel()
+            # mod = mod[:, None] * sl[None, :]
+            return mod
 
         def model_compressed(coef):
-            return np.ma.compressed(model(coef))
+            return np.ma.compressed((model(coef) - img).ravel())
 
         A = 1  # np.nanpercentile(img_compressed, 95)
         sig = (xmax - xmin) / 4  # TODO
@@ -680,6 +582,25 @@ class cr2res_util_slit_curv_sky(PyRecipe):
             tilt, shear = res.x[3], res.x[4]
         else:
             tilt, shear = 0, 0
+
+        plot = True
+        if plot:
+            nrows, _ = img.shape
+            model_data = model(res.x)
+            middle = nrows // 2
+            y = np.arange(-middle, -middle + nrows)
+            x = res.x[1] - xmin + (tilt + shear * y) * y
+            y += middle
+            
+            vmin, vmax = 0, 1
+            plt.clf()
+            plt.subplot(121)
+            plt.imshow(img, interpolation="none", vmin=vmin, vmax=vmax)
+            plt.plot(x, y, "r")
+            plt.subplot(122)
+            plt.imshow(model_data, interpolation="none", vmin=vmin, vmax=vmax)
+            plt.plot(x, y, "r")
+            plt.savefig(f"cr2res_util_slit_curv_sky_c{chip}_o{order}_p{npeak}.png")
 
         return tilt, shear
 
@@ -714,7 +635,7 @@ class cr2res_util_slit_curv_sky(PyRecipe):
         return coef_tilt, coef_shear, peaks
 
     def _determine_curvature_all_lines(
-        self, original, extracted, orders, extraction_width, column_range, order_range
+        self, original, extracted, orders, extraction_width, column_range, order_range, chip=0, order_nrs=None
     ):
         ncol = original.shape[1]
         # Store data from all orders
@@ -724,6 +645,9 @@ class cr2res_util_slit_curv_sky(PyRecipe):
         plot_vec = []
 
         n = order_range[1] - order_range[0]
+        if order_nrs is None:
+            order_nrs = np.arange(n)
+
         for j in tqdm(range(n), desc="Order"):
             cr = column_range[j]
             xwd = extraction_width[j]
@@ -736,7 +660,7 @@ class cr2res_util_slit_curv_sky(PyRecipe):
             vec, peaks = self._find_peaks(vec, cr)
 
             npeaks = len(peaks)
-            Msg.debug(self._name, f"{npeaks} peaks found in Order {j}")
+            Msg.debug(self._name, f"{npeaks} peaks found in Order {order_nrs[j]}")
 
             # Determine curvature for each line seperately
             tilt = np.zeros(npeaks)
@@ -747,7 +671,7 @@ class cr2res_util_slit_curv_sky(PyRecipe):
             ):
                 try:
                     tilt[ipeak], shear[ipeak] = self._determine_curvature_single_line(
-                        original, extracted[j], peak, ycen, ycen_int, xwd
+                        original, extracted[j], peak, ycen, ycen_int, xwd, chip=chip, order=order_nrs[j], npeak=ipeak
                     )
                 except RuntimeError:  # pragma: no cover
                     mask[ipeak] = False
@@ -794,7 +718,7 @@ class cr2res_util_slit_curv_sky(PyRecipe):
         return tilt, shear
 
     def execute(
-        self, extracted, original, orders, extraction_width, column_range, order_range
+        self, extracted, original, orders, extraction_width, column_range, order_range, chip=0, order_nrs=None
     ):
 
         (orders, extraction_width, column_range, order_range,) = self._fix_inputs(
@@ -806,7 +730,7 @@ class cr2res_util_slit_curv_sky(PyRecipe):
         )
 
         peaks, tilt, shear, vec = self._determine_curvature_all_lines(
-            original, extracted, orders, extraction_width, column_range, order_range
+            original, extracted, orders, extraction_width, column_range, order_range, chip=chip, order_nrs=order_nrs
         )
 
         coef_tilt, coef_shear = self.fit(peaks, tilt, shear, order_range)

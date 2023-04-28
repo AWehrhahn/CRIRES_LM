@@ -83,7 +83,7 @@ def compare(fname_trace, fname_img=None, outfile=None, dpi=180, normalize=True, 
             imgdata = img['CHIP%d.INT1'%det].data
             imgdata = np.nan_to_num(imgdata)
             if bpm is not None:
-                bpmdata = bpm["CHIP%d.INT1" % i].data
+                bpmdata = bpm["CHIP%d.INT1" % det].data
                 if bpmdata is not None:
                     imgdata[bpmdata != 0] = 0
 
@@ -95,11 +95,13 @@ def compare(fname_trace, fname_img=None, outfile=None, dpi=180, normalize=True, 
                     middle = np.polyval(alla[::-1], X)
                     upper = np.polyval(upper[::-1], X)
                     lower = np.polyval(lower[::-1], X)
-                    up = int(np.ceil(np.max(upper - middle)))
-                    low = int(np.ceil(np.max(middle - lower)))
+                    up = int(np.ceil(np.min(upper - middle)))
+                    low = int(np.ceil(np.min(middle - lower)))
                     middle = np.asarray(middle, dtype=int)
                     idx = make_index(middle - low, middle + up, 0, 2048)
-                    imgdata[idx] = exposure.equalize_hist(imgdata[idx])
+                    vmin, vmax = np.nanpercentile(imgdata[idx], (5, 95))
+                    mask = (imgdata[idx] > vmin) & (imgdata[idx] < vmax)
+                    imgdata[idx] = exposure.equalize_hist(imgdata[idx], mask=mask)
                 vmin, vmax = 0, 1
             else:
                 vmin, vmax = np.percentile(imgdata[imgdata != 0], (5, 95))

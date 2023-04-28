@@ -1,6 +1,6 @@
 #!/bin/bash
 folder="/scratch/ptah/anwe5599/CRIRES"
-
+# day setting exptime
 settings=(  "2022-11-29" "L3262" 30 \
             "2022-12-23" "M4318" 10 \
             "2022-12-23" "L3262" 30 \

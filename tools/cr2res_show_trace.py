@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def compare(fname_trace, fname_img=None, fname_spec=None, figname=None, dpi=240, fname_bpm=None):
+def compare(fname_trace, fname_img=None, fname_spec=None, figname=None, dpi=240, fname_bpm=None, vmin=None, vmax=None):
     """ compare img and trace """
     trace = fits.open(fname_trace)
     if fname_img:
@@ -22,7 +22,7 @@ def compare(fname_trace, fname_img=None, fname_spec=None, figname=None, dpi=240,
         bpm = None
 
     X = np.arange(2048)
-    FIG = plt.figure(figsize=(10, 3.5))
+    FIG = plt.figure(figsize=(10, 4))
 
     for i in [1, 2, 3]:
         ax = FIG.add_subplot(1, 3, i)
@@ -42,13 +42,20 @@ def compare(fname_trace, fname_img=None, fname_spec=None, figname=None, dpi=240,
             imgdata = img["CHIP%d.INT1" % i].data
             if imgdata is not None:
                 # imgdata = np.ma.masked_where(np.isnan(imgdata),imgdata)
-                imgdata = np.nan_to_num(imgdata)
+                # imgdata = np.nan_to_num(imgdata)
                 if bpm is not None:
                     bpmdata = bpm["CHIP%d.INT1" % i].data
                     if bpmdata is not None:
-                        imgdata[bpmdata != 0] = 0
-                vmin, vmax = np.nanpercentile(imgdata, (5, 98))
-                ax.imshow(imgdata, origin="lower", cmap="plasma", vmin=vmin, vmax=vmax)
+                        imgdata[bpmdata != 0] = np.nan
+                if vmin is None:
+                    _vmin = np.nanpercentile(imgdata, 5)
+                else:
+                    _vmin = vmin
+                if vmax is None:
+                    _vmax = np.nanpercentile(imgdata, 98)
+                else:
+                    _vmax = vmax
+                ax.imshow(imgdata, origin="lower", cmap="plasma", vmin=_vmin, vmax=_vmax, interpolation="none")
 
         for t in tdata:
             pol = np.polyval(t["Upper"][::-1], X)
@@ -73,6 +80,7 @@ def compare(fname_trace, fname_img=None, fname_spec=None, figname=None, dpi=240,
     FIG.tight_layout(pad=0.02)
     if figname is None:
         figname = fname_trace.replace(".fits", ".png")
+    print(f"Saving plot: {figname}")
     plt.savefig(figname, dpi=dpi)
 
 
@@ -85,7 +93,9 @@ if __name__ == "__main__":
     parser.add_argument("--spec")
     parser.add_argument("--bpm")
     parser.add_argument("--out")
-    parser.add_argument("--dpi", default=240)
+    parser.add_argument("--dpi", default=1000)
+    parser.add_argument("--vmin", type=float)
+    parser.add_argument("--vmax", type=float)
     args = parser.parse_args()
 
     fname_trace = args.trace
@@ -94,5 +104,7 @@ if __name__ == "__main__":
     fname_out = args.out
     fname_bpm = args.bpm
     dpi = args.dpi
+    vmin = args.vmin
+    vmax = args.vmax
 
-    compare(fname_trace, fname_img, fname_spec, fname_out, fname_bpm=fname_bpm, dpi=dpi)
+    compare(fname_trace, fname_img, fname_spec, fname_out, fname_bpm=fname_bpm, dpi=dpi, vmin=vmin, vmax=vmax)

@@ -89,7 +89,7 @@ import os
 import glob
 import subprocess
 import pandas as pd
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from astropy.io import fits
 from os.path import join, dirname, realpath
 
@@ -288,17 +288,17 @@ if len(flat_exps) > 1 or len(flat_ndits) > 1:
     exps = cal_frames[is_flat]["exp"].values[[0, -1]]
 
     # Plot a comparison for easy reference to check for saturation
-    fig, axes = plt.subplots(2, 3)
-    for flat_i in range(2):
-        with fits.open(fns[flat_i]) as flat:
-            for chip_i in np.arange(1, 4):
-                xx = axes[flat_i, chip_i - 1].imshow(flat[chip_i].data)
-                fig.colorbar(xx, ax=axes[flat_i, chip_i - 1])
+    # fig, axes = plt.subplots(2, 3)
+    # for flat_i in range(2):
+    #     with fits.open(fns[flat_i]) as flat:
+    #         for chip_i in np.arange(1, 4):
+    #             xx = axes[flat_i, chip_i - 1].imshow(flat[chip_i].data)
+    #             fig.colorbar(xx, ax=axes[flat_i, chip_i - 1])
 
-            axes[flat_i, 0].set_ylabel(f"Exp = {exps[flat_i]}")
+    #         axes[flat_i, 0].set_ylabel(f"Exp = {exps[flat_i]}")
 
-    plt.savefig(join(outdir, "flat_comparison.pdf"))
-    plt.close("all")
+    # plt.savefig(join(outdir, "flat_comparison.pdf"))
+    # plt.close("all")
 
     # Grab the larger exposure
     flat_exp = list(flat_exps)[np.argmax(np.array(list(flat_exps)).astype(float))]
@@ -376,8 +376,6 @@ combine_A_sof_data.append(master_dark_bpm, "CAL_DARK_BPM")
 combine_A_sof_data.append(master_dark, "CAL_DARK_MASTER")
 combine_A_sof_data.write(combine_A_sof)
 
-
-
 ff_name_science_A = join(outdir, "cr2res_util_calib_science_A_collapsed.fits")
 
 combine_B_sof = join(outdir, "combine_B.sof")
@@ -402,6 +400,39 @@ combine_sky_sof_data.append(tw_name, "CAL_FLAT_TW")
 combine_sky_sof_data.write(combine_sky_sof)
 
 sky_name = join(outdir, "cr2res_util_combine_sky.fits")
+
+# -----------------------------------------------------------------------------
+# Write SOF for sky BPM
+# -----------------------------------------------------------------------------
+bpm_create_sof = join(outdir, "bpm_create.sof")
+bpm_create_sof_data = SofFile()
+bpm_create_sof_data.append(master_dark, "UTIL_CALIB")
+bpm_create_sof_data.append(tw_name, "CAL_FLAT_TW")
+bpm_create_sof_data.write(bpm_create_sof)
+
+bpm_create2_sof = join(outdir, "bpm_create2.sof")
+bpm_create2_sof_data = SofFile()
+bpm_create2_sof_data.append(ff_name_flat, "UTIL_CALIB")
+bpm_create2_sof_data.append(tw_name, "CAL_FLAT_TW")
+bpm_create2_sof_data.write(bpm_create2_sof)
+
+bpm_create3_sof = join(outdir, "bpm_create3.sof")
+bpm_create3_sof_data = SofFile()
+bpm_create3_sof_data.append(sky_name, "UTIL_CALIB")
+bpm_create3_sof_data.append(tw_name, "CAL_FLAT_TW")
+bpm_create3_sof_data.write(bpm_create3_sof)
+
+bpm_create_file = join(outdir, "cr2res_util_bpm_create.fits")
+
+bpm_merge_sof = join(outdir, "bpm_merge.sof")
+bpm_merge_sof_data = SofFile()
+bpm_merge_sof_data.append(bpm_create_file, "UTIL_BPM_SPLIT")
+bpm_merge_sof_data.append(master_dark_bpm, "CAL_DARK_BPM")
+bpm_merge_sof_data.write(bpm_merge_sof)
+
+bpm_merge_file = join(outdir, "cr2res_util_bpm_merge.fits")
+
+
 
 # -----------------------------------------------------------------------------
 # Write SOF for flats
@@ -453,6 +484,15 @@ sky_extr_sof_data.write(sky_extr_sof)
 sky_extr_name = join(outdir, "cr2res_util_combine_sky_extr1D.fits")
 sky_extr_model_name = join(outdir, "cr2res_util_combine_sky_extrModel.fits")
 
+bpm_create_extract_sof = join(outdir, "bpm_create_extract.sof")
+bpm_create_sof_extract_data = SofFile()
+bpm_create_sof_extract_data.append(sky_name, "UTIL_CALIB")
+bpm_create_sof_extract_data.append(tw_name, "CAL_FLAT_TW")
+bpm_create_sof_extract_data.append(sky_extr_model_name, "UTIL_SLIT_MODEL")
+bpm_create_sof_extract_data.write(bpm_create_extract_sof)
+
+bpm_create_extract_file = join(outdir, "cr2res_util_bpm_create.fits")
+
 # -----------------------------------------------------------------------------
 # Write SOF for slit curvature
 # -----------------------------------------------------------------------------
@@ -461,7 +501,6 @@ slit_curv_sof_data = SofFile()
 slit_curv_sof_data.append(tw_name, "CAL_FLAT_TW")
 slit_curv_sof_data.append(sky_name, "UTIL_CALIB")
 slit_curv_sof_data.append(sky_extr_name, "UTIL_CALIB_EXTRACT_1D")
-slit_curv_sof_data.append(sky_extr_model_name, "UTIL_CALIB_EXTRACT_MODEL")
 slit_curv_sof_data.append(master_dark_bpm, "CAL_DARK_BPM")
 slit_curv_sof_data.write(slit_curv_sof)
 
@@ -470,10 +509,12 @@ slit_curv_sof_data.write(slit_curv_sof)
 # -----------------------------------------------------------------------------
 extract_star_sof = join(outdir, "extract_stellar.sof")
 extract_star_sof_data = SofFile()
-for s in science_exps_A:
-    extract_star_sof_data.append(s, "OBS_NODDING_OTHER")
-for s in science_exps_B:
-    extract_star_sof_data.append(s, "OBS_NODDING_OTHER")
+extract_star_sof_data.append(ff_name_science_A, "OBS_NODDING_OTHER")
+extract_star_sof_data.append(ff_name_science_B, "OBS_NODDING_OTHER")
+# for s in science_exps_A:
+#     extract_star_sof_data.append(s, "OBS_NODDING_OTHER")
+# for s in science_exps_B:
+#     extract_star_sof_data.append(s, "OBS_NODDING_OTHER")
 extract_star_sof_data.append(tw_name, "CAL_FLAT_TW")
 extract_star_sof_data.append(ff_norm_flat, "UTIL_MASTER_FLAT")
 extract_star_sof_data.append(master_dark_bpm, "CAL_DARK_BPM")
@@ -535,23 +576,58 @@ pyesorex = "pyesorex"
 commands = [
     "#!/bin/bash\n"
     # Create master dark
-    f"{esorex} cr2res_cal_dark --bpm_method=GLOBAL {dark_sof}\n"
+    f"{esorex} cr2res_cal_dark --bpm_method=LOCAL {dark_sof}\n"
     # Create an initial trace wave
-    f"{esorex} cr2res_util_calib --collapse=MEAN {flat_sof}\n"
+    f"{esorex} cr2res_util_calib --collapse=MEDIAN {flat_sof}\n"
     f"mv {ff_name} {ff_name_flat}\n"
     f"{esorex} cr2res_util_trace {tw_sof}\n"
+    # Filter additional bad pixels
+    f"{pyesorex} cr2res_util_bpm_create --bpm_method=NOLIGHTROWS {bpm_create_sof}\n"
+    f"{esorex} cr2res_util_bpm_merge {bpm_merge_sof}\n"
+    f"mv {bpm_merge_file} {master_dark_bpm}\n"
+    f"{pyesorex} cr2res_util_bpm_create {bpm_create_sof}\n"
+    f"{esorex} cr2res_util_bpm_merge {bpm_merge_sof}\n"
+    f"mv {bpm_merge_file} {master_dark_bpm}\n"
+    f"{pyesorex} cr2res_util_bpm_create {bpm_create2_sof}\n"
+    f"{esorex} cr2res_util_bpm_merge {bpm_merge_sof}\n"
+    f"mv {bpm_merge_file} {master_dark_bpm}\n"
+    f"{pyesorex} cr2res_util_bpm_create --bpm_method=ORDER --bpm_kappa=5 {bpm_create_sof}\n"
+    f"{esorex} cr2res_util_bpm_merge {bpm_merge_sof}\n"
+    f"mv {bpm_merge_file} {master_dark_bpm}\n"
     f"python {join(python_cmd_dir, 'cr2res_show_trace.py')} {tw_name} {ff_name_flat} --bpm={master_dark_bpm} --out={join(outdir, 'cr2res_util_trace.png')}\n"
+    f"python {join(python_cmd_dir, 'cr2res_show_trace.py')} {tw_name} {master_dark} --bpm={master_dark_bpm} --out={join(outdir, 'cr2res_cal_dark.png')}\n"
+    f"python {join(python_cmd_dir, 'cr2res_show_trace.py')} {tw_name} {master_dark_bpm} --vmin=0 --vmax=1 --out={join(outdir, 'cr2res_cal_dark_bpm.png')}\n"
     # Combine the observations into a sky only observation (no curvature)
     f"{esorex} cr2res_util_calib --collapse=MEDIAN --subtract_interorder_column=FALSE {combine_A_sof}\n"
     f"mv {ff_name} {ff_name_science_A}\n"
+    f"python {join(python_cmd_dir, 'cr2res_util_fits_header_update.py')} {ff_name_science_A} 'HIERARCH ESO SEQ NODPOS' A\n"
     f"python {join(python_cmd_dir, 'cr2res_show_trace.py')} {tw_name} {ff_name_science_A} --bpm={master_dark_bpm} --out={join(outdir, 'cr2res_util_combine_A.png')}\n"
     f"{esorex} cr2res_util_calib --collapse=MEDIAN --subtract_interorder_column=FALSE {combine_B_sof}\n"
     f"mv {ff_name} {ff_name_science_B}\n"
+    f"python {join(python_cmd_dir, 'cr2res_util_fits_header_update.py')} {ff_name_science_B} 'HIERARCH ESO SEQ NODPOS' B\n"
     f"python {join(python_cmd_dir, 'cr2res_show_trace.py')} {tw_name} {ff_name_science_B} --bpm={master_dark_bpm} --out={join(outdir, 'cr2res_util_combine_B.png')}\n"
     f"{pyesorex} cr2res_util_combine_sky {combine_sky_sof}\n"
+    # Create Bad Pixel Map of the combined sky image
+    f"{pyesorex} cr2res_util_bpm_create {bpm_create3_sof}\n"
+    f"{esorex} cr2res_util_bpm_merge {bpm_merge_sof}\n"
+    f"mv {bpm_merge_file} {master_dark_bpm}\n"
+
     f"python {join(python_cmd_dir, 'cr2res_show_trace.py')} {tw_name} {sky_name} --bpm={master_dark_bpm} --out={join(outdir, 'cr2res_util_combine.png')}\n"
     # Extract sky spectrum (no curvature)
-    f"{esorex} cr2res_util_extract --smooth_spec=0.0001 {sky_extr_sof}\n"
+    f"{esorex} cr2res_util_extract --smooth_spec=0.0001 --swath_width=2048 {sky_extr_sof}\n"
+    f"python {join(python_cmd_dir, 'cr2res_show_spectrum.py')} {tw_name} {sky_extr_name} --out={join(outdir, 'cr2res_util_combine_sky_extr1D.png')}\n"
+    # Extract the mask from the optimal extraction model
+    # f"{pyesorex} cr2res_util_bpm_create_from_extract --bpm_kappa=6 {bpm_create_extract_sof}\n"
+    # f"{esorex} cr2res_util_bpm_merge {bpm_merge_sof}\n"
+    # f"mv {bpm_merge_file} {master_dark_bpm}\n"
+    ]
+
+# For the M band we remove the 5th order as it is dominated entirely by telluric absorption
+# Thus removing any useful signal
+if wl_setting == "M4318":
+    commands += [f"python {join(python_cmd_dir, 'cr2res_util_trace_remove.py')} {tw_name} 5\n"]
+
+commands += [
     # Determine curvature from sky emissions
     f"{pyesorex} cr2res_util_slit_curv_sky {slit_curv_sof}\n"
     f"python {join(python_cmd_dir, 'cr2res_show_trace_curv.py')} {tw_name} {sky_name} --bpm={master_dark_bpm} --out={join(outdir, 'cr2res_util_slit_curv.png')}\n"
@@ -562,23 +638,25 @@ commands = [
     # Combine the sky images (with curvature and norm flat)
     f"{esorex} cr2res_util_calib --collapse=MEDIAN --subtract_interorder_column=FALSE {combine_A_flat_sof}\n"
     f"mv {ff_name} {ff_name_science_A}\n"
+    f"python {join(python_cmd_dir, 'cr2res_util_fits_header_update.py')} {ff_name_science_A} 'HIERARCH ESO SEQ NODPOS' A\n"
     f"python {join(python_cmd_dir, 'cr2res_show_trace.py')} {tw_name} {ff_name_science_A} --bpm={master_dark_bpm} --out={join(outdir, 'cr2res_util_combine_A.png')}\n"
     f"{esorex} cr2res_util_calib --collapse=MEDIAN --subtract_interorder_column=FALSE {combine_B_flat_sof}\n"
     f"mv {ff_name} {ff_name_science_B}\n"
+    f"python {join(python_cmd_dir, 'cr2res_util_fits_header_update.py')} {ff_name_science_B} 'HIERARCH ESO SEQ NODPOS' B\n"
     f"python {join(python_cmd_dir, 'cr2res_show_trace.py')} {tw_name} {ff_name_science_B} --bpm={master_dark_bpm} --out={join(outdir, 'cr2res_util_combine_B.png')}\n"
     f"{pyesorex} cr2res_util_combine_sky {combine_sky_sof}\n"
     f"python {join(python_cmd_dir, 'cr2res_show_trace.py')} {tw_name} {sky_name} --bpm={master_dark_bpm} --out={join(outdir, 'cr2res_util_combine.png')}\n"
     # Extract sky spectrum (with curvature)
-    f"{esorex} cr2res_util_extract --smooth_spec=0.0001 {sky_extr_sof}\n"
+    f"{esorex} cr2res_util_extract --smooth_spec=0.0001 --swath_width=2048 {sky_extr_sof}\n"
     f"python {join(python_cmd_dir, 'cr2res_show_spectrum.py')} {tw_name} {sky_extr_name} --out={join(outdir, 'cr2res_util_combine_sky_extr1D.png')}\n"
-    # Molecfit on sky emission spectrum
-    f"{pyesorex}  cr2res_wave_molecfit_prepare --transmission=False {molecfit_prepare_sky_sof}\n"
-    f"{esorex} --recipe-config={molecfit_model_rc} molecfit_model {molecfit_model_sof}\n"
-    f"mv {molecfit_mapping} {molecfit_mapping_sky}\n"
-    f"mv {molecfit_best_model} {molecfit_best_model_sky}\n"
     # Extract stellar spectrum
     f"{esorex} cr2res_obs_nodding --subtract_interorder_column=FALSE {extract_star_sof}\n"
     f"python {join(python_cmd_dir, 'cr2res_show_spectrum.py')} {tw_name} {extract_star} --out={join(outdir, 'cr2res_obs_nodding_extr1D.png')}\n"
+    # Molecfit on sky emission spectrum
+    f"{pyesorex} cr2res_wave_molecfit_prepare --transmission=False {molecfit_prepare_sky_sof}\n"
+    f"{esorex} --recipe-config={molecfit_model_rc} molecfit_model {molecfit_model_sof}\n"
+    f"mv {molecfit_mapping} {molecfit_mapping_sky}\n"
+    f"mv {molecfit_best_model} {molecfit_best_model_sky}\n"
     # Molecfit on stellar spectrum
     f"{pyesorex} cr2res_wave_molecfit_prepare --transmission=True {molecfit_prepare_star_sof}\n"
     f"{esorex} --recipe-config={molecfit_model_rc} molecfit_model {molecfit_model_sof}\n"

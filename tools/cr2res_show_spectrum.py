@@ -12,7 +12,7 @@ if __name__ == "__main__":
 
     tw_fname = args.tracewave
     extr_fname = args.extract
-    output = args.output
+    output = args.out
     if output is None:
         output = tw_fname.replace(".fits", ".png")
 
@@ -32,9 +32,12 @@ if __name__ == "__main__":
         orders = np.sort(tw_data["Order"])
         for order in orders:
             spec = extr_data[f"{order:02}_01_SPEC"]
-            spec -= spec[10:-10].min()
-            spec /= spec[10:-10].max()
+            spec -= np.nanmin(spec[20:-20])
+            spec /= np.nanmax(spec[20:-20])
+            spec[:20] = np.nan
+            spec[-20:] = np.nan
             ax.plot(spec + order - orders[0], lw=0.1)
 
     fig.subplots_adjust(wspace=0)
+    print(f"Saving plot: {output}")
     fig.savefig(output, dpi=1200)
