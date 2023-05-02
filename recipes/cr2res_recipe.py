@@ -29,8 +29,18 @@ class CR2RES_RECIPE:
         return f"{order:02}_{trace:02}_{column}"
 
     @staticmethod
+    def get_orders_trace_wave(trace_wave: Dict[str, Any]) -> List[int]:
+        """ Get the orders contained in a trace wave """
+        return sorted(list(set(trace_wave["Order"])))
+    
+    @staticmethod
+    def get_orders_spectrum(spectrum: Dict[str, Any]) -> List[int]:
+        """ Get the order numbers contained in a spectrum """
+        return sorted([int(c[:2]) for c in spectrum.names if c[-4:] == "SPEC"])
+
+    @staticmethod
     def get_order_trace(
-        trace_wave: Dict[str, Any], order: int
+        trace_wave: Dict[str, Any], order: int, clip:bool=True
     ) -> Tuple[INDEX1D, INDEX1D, INDEX1D]:
         """ Load the order trace indices from a trace wave table """
         idx = trace_wave["Order"] == order
@@ -39,13 +49,16 @@ class CR2RES_RECIPE:
         lower = np.polyval(trace_wave[idx]["Lower"][0][::-1], x)
         middle = np.polyval(trace_wave[idx]["All"][0][::-1], x)
 
-        height_upp = int(np.ceil(np.min(upper - middle)))
-        height_low = int(np.ceil(np.min(middle - lower)))
+        if clip:
+            height_upp = int(np.ceil(np.min(upper - middle)))
+            height_low = int(np.ceil(np.min(middle - lower)))
 
-        middle_int = middle.astype(int)
-        upper_int = middle_int + height_upp
-        lower_int = middle_int - height_low
-        return lower_int, middle_int, upper_int
+            middle_int = middle.astype(int)
+            upper_int = middle_int + height_upp
+            lower_int = middle_int - height_low
+            return lower_int, middle_int, upper_int
+        else:
+            return lower, middle, upper
 
     @staticmethod
     def make_index(
