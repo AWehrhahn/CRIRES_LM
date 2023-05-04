@@ -611,7 +611,6 @@ commands = [
     f"{pyesorex} cr2res_util_bpm_create {bpm_create3_sof}\n"
     f"{esorex} cr2res_util_bpm_merge {bpm_merge_sof}\n"
     f"mv {bpm_merge_file} {master_dark_bpm}\n"
-
     f"python {join(python_cmd_dir, 'cr2res_show_trace.py')} {tw_name} {sky_name} --bpm={master_dark_bpm} --out={join(outdir, 'cr2res_util_combine.png')}\n"
     # Extract sky spectrum (no curvature)
     f"{esorex} cr2res_util_extract --smooth_spec=0.0001 --swath_width=2048 {sky_extr_sof}\n"
@@ -629,7 +628,7 @@ if wl_setting == "M4318":
 
 commands += [
     # Determine curvature from sky emissions
-    f"{pyesorex} cr2res_util_slit_curv_sky --degree_x=2 --degree_y=3 {slit_curv_sof}\n"
+    f"{pyesorex} cr2res_util_slit_curv_sky --degree_x=2 --degree_y=1 {slit_curv_sof}\n"
     f"python {join(python_cmd_dir, 'cr2res_show_trace_curv.py')} {tw_name} {sky_name} --bpm={master_dark_bpm} --out={join(outdir, 'cr2res_util_slit_curv.png')}\n"
     # Create master flat (with curvature)
     f"{esorex} cr2res_util_extract --smooth_spec=0.0001 {flat_extr_sof}\n"

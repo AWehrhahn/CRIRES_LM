@@ -16,8 +16,11 @@ from cpl.ui import (
 from numpy.polynomial.polynomial import polyval2d
 from scipy import signal
 from scipy.interpolate import interp1d
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d, median_filter
 from scipy.optimize import least_squares
+from scipy.linalg import svd
+from skimage import exposure
+
 
 sys.path.append(dirname(__file__))
 from cr2res_recipe import CR2RES_RECIPE
@@ -277,13 +280,14 @@ class cr2res_util_slit_curv_sky(PyRecipe, CR2RES_RECIPE):
     sigma_cutoff = 3
     curv_degree = 1
     threshold = 1.5
-    window_width = 21
+    window_width = 41
     fit_degree = (1, 1)
     mode = "2D"
     peak_function = "spectrum"
     plot = True
     chip = 0
     order = 0
+    wl_set = ""
 
     def __init__(self) -> None:
         super().__init__()
@@ -332,6 +336,9 @@ class cr2res_util_slit_curv_sky(PyRecipe, CR2RES_RECIPE):
     def determine_slit_curvature(self, trace_wave, science, extracted, bpm=None):
         tilts = {}
         shears = {}
+
+        header = science[0].header
+        self.wl_set = header["ESO INS WLEN ID"]
 
         for chip in self.detectors:
             Msg.info(self.name, f"Processing Detector {chip}")
@@ -526,19 +533,49 @@ class cr2res_util_slit_curv_sky(PyRecipe, CR2RES_RECIPE):
     def _find_peaks(self, vec, cr):
         # TODO: Test this heuristic on other spectra?
         # First find all peaks regardless of height
-        # Then only use the 50% largest peaks
+        # Then only use the peaks above the mean
+        # We specifically want the mean and not the median
+        # as we need the inluence of the large peaks to be stronger
         # This should work well for "natural" spectra that have random small peaks
         # But how well does it work on well performing wavelength calibration images?
-        vec -= np.nanmedian(vec)
+        vec -= np.nanpercentile(vec, 10)
         vec[~np.isfinite(vec)] = 0
         peaks, stats = signal.find_peaks(
             vec, width=self.peak_width, distance=self.window_width
         )
         prominence = stats["prominences"]
+        # height = np.mean(prominence)
         height = np.median(prominence)
+        # height = np.nanpercentile(vec, 20)
+        Msg.info(self.name, f"Peak detection threshold height: {height}")
         peaks, _ = signal.find_peaks(
             vec, prominence=height, width=self.peak_width, distance=self.window_width
         )
+
+        # Remove peaks at the edge
+        peaks = peaks[
+            (peaks >= self.window_width + 1)
+            & (peaks < len(vec) - self.window_width - 1)
+        ]
+
+        # Manually remove bad areas of peaks
+        if self.wl_set == "L3262":
+            if self.chip == 3 and self.order == 2:
+                peaks = peaks[peaks < 1000]
+            elif self.chip == 3 and self.order == 3:
+                peaks = peaks[peaks > 150]
+                peaks = peaks[(peaks < 700) | (peaks > 1100)]
+                peaks = peaks[(peaks < 1600) | (peaks > 1880)]
+        elif self.wl_set == "L3340":
+            if self.chip == 1 and self.order == 3:
+                peaks = peaks[peaks > 200]
+            elif self.chip == 3 and self.order == 2:
+                peaks = peaks[peaks < 1200]
+            elif self.chip == 3 and self.order == 3:
+                peaks = peaks[peaks < 1500]
+        elif self.wl_set == "L3426":
+            if self.chip == 2 and self.order == 2:
+                peaks = []
 
         if self.plot:
             plt.clf()
@@ -546,11 +583,6 @@ class cr2res_util_slit_curv_sky(PyRecipe, CR2RES_RECIPE):
             plt.plot(peaks, vec[peaks], "d")
             plt.savefig(f"cr2res_util_slit_curv_sky_peaks_c{self.chip}_o{self.order}.png")
 
-        # Remove peaks at the edge
-        peaks = peaks[
-            (peaks >= self.window_width + 1)
-            & (peaks < len(vec) - self.window_width - 1)
-        ]
         # Remove the offset, due to vec being a subset of extracted
         peaks += cr[0]
         return vec, peaks
@@ -598,23 +630,22 @@ class cr2res_util_slit_curv_sky(PyRecipe, CR2RES_RECIPE):
         idx = self.make_index(ycen_int - xwd[0], ycen_int + xwd[1], xmin, xmax)
         img = original[idx]
 
+        # Remove the background
         sl = np.ma.median(img, axis=1)
         sl = gaussian_filter1d(sl.data.ravel(), 10)
         img = img - sl[:, None]
 
+        # Normalize the image
         img_compressed = np.ma.compressed(img)
         img_min = np.percentile(img_compressed, 5)
         img_max = np.percentile(img_compressed, 95)
         img -= img_min
         img /= img_max - img_min
-        # img = np.ma.clip(img, 0, 1)
 
-        # sl = np.ma.median(img, axis=1)
-        # sl = gaussian_filter1d(sl.data.ravel(), 10)
-        # img -= sl[:, None]
+        img[:] = exposure.equalize_hist(img.data, mask=~img.mask)
+        img[np.isnan(img)] = np.ma.masked
 
-        # sl = sl[:, None]
-        # sl = np.full(ncol, 1)
+        # Normalize the spectrum
         sp = extracted
         sp -= sp[xmin:xmax].min()
         sp /= sp[xmin:xmax].max()
@@ -662,13 +693,22 @@ class cr2res_util_slit_curv_sky(PyRecipe, CR2RES_RECIPE):
             f_scale=0.1,
             bounds=bounds,
         )
-        unc = np.sqrt(np.diag(res.jac.T @ res.jac))
+
+        # To get the ucnertainties of the fit
+        # Do Moore-Penrose inverse discarding zero singular values.
+        # See scipy curve_fit
+        _, s, VT = svd(res.jac, full_matrices=False)
+        threshold = np.finfo(float).eps * max(res.jac.shape) * s[0]
+        s = s[s > threshold]
+        VT = VT[:s.size]
+        pcov = np.dot(VT.T / s**2, VT)
+        unc = np.sqrt(np.diag(pcov))
 
         if self.curv_degree == 1:
             tilt, shear = res.x[3], 0
             # utilt, ushear = unc[3], 1
             model_data = model(res.x)
-            utilt = np.nanstd(img - model_data)
+            utilt = unc[3]
             ushear = 1
         elif self.curv_degree == 2:
             tilt, shear = res.x[3], res.x[4]
@@ -919,7 +959,7 @@ class cr2res_util_slit_curv_sky(PyRecipe, CR2RES_RECIPE):
 
 
 if __name__ == "__main__":
-    fs = FrameSet("/scratch/ptah/anwe5599/CRIRES/2022-12-25_L3340/extr/slit_curv.sof")
-    settings = {"degree_x": 2, "degree_y": 3, "detector": 2}
+    fs = FrameSet("/scratch/ptah/anwe5599/CRIRES/2022-12-23_M4318/extr/slit_curv.sof")
+    settings = {"degree_x": 2, "degree_y": 1, "detector": 1}
     module = cr2res_util_slit_curv_sky()
     module.run(fs, settings)

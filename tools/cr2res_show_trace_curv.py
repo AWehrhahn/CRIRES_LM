@@ -133,7 +133,7 @@ def compare(fname_trace, fname_img=None, outfile=None, dpi=180, normalize=True, 
             coeff = [np.interp(0.5, i1, i2[:, k]) for k in range(i2.shape[1])]
 
 
-            for i in range(30, 2048, 200):
+            for i in range(30, 2048, 100):
                 ew = [int(middle[i] - lower[i]), int(upper[i] - middle[i])]
                 x = np.zeros(ew[0] + ew[1] + 1)
                 y = np.arange(-ew[0], ew[1] + 1).astype(float)
