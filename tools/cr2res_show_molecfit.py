@@ -64,17 +64,20 @@ if __name__ == "__main__":
             mask_sky = mf_wave_sky != 0
             mask_star = mf_wave_star != 0
 
+            mf_diff = np.abs(mf_wave_sky - mf_wave_star)
+            max_diff = np.nanmax(mf_diff[mask_sky & mask_star])
+
             plt.clf()
-            plt.subplot(211)
+            ax = plt.subplot(211)
             plt.title("STAR")
             plt.plot(mf_wave_star[mask_star], ex_spec_star[mask_star], label="Extracted")
             plt.plot(mf_wave_star[mask_star], mf_spec_star[mask_star], "--", label="Model")
-            plt.subplot(212)
+            plt.subplot(212, sharex=ax)
             plt.title("SKY")
             plt.plot(mf_wave_sky[mask_sky], ex_spec_sky[mask_sky], label="Extracted")
             plt.plot(mf_wave_sky[mask_sky], mf_spec_sky[mask_sky], "--", label="Model")
             plt.legend()
-            plt.suptitle(f"CHIP: {chip} ORDER: {order:02}")
+            plt.suptitle(f"CHIP: {chip} ORDER: {order:02} DIFF: {max_diff:.2} nm")
             outname = f"cr2res_wave_molecfit_c{chip}_o{order:02}.png"
             print(f"Saving plot: {outname}")
             plt.savefig(outname, dpi=600)

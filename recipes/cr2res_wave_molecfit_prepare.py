@@ -431,6 +431,7 @@ class cr2res_wave_molecfit_prepare(PyRecipe, CR2RES_RECIPE):
             if not transmission:
                 idx = mapping["MOLECFIT"][(mapping["CHIP"] == 2) & (mapping["ORDER"] == 3)][0] - 1
                 flux[idx][1024-500:1024+500] = 0
+
         
             idx = mapping["MOLECFIT"][(mapping["CHIP"] == 2) & (mapping["ORDER"] == 3)][0] - 1
             flux[idx][-100:] = 0

@@ -569,6 +569,7 @@ class cr2res_util_slit_curv_sky(PyRecipe, CR2RES_RECIPE):
         elif self.wl_set == "L3340":
             if self.chip == 1 and self.order == 3:
                 peaks = peaks[peaks > 200]
+                peaks = peaks[(peaks < 300) | (peaks > 600)]
             elif self.chip == 3 and self.order == 2:
                 peaks = peaks[peaks < 1200]
             elif self.chip == 3 and self.order == 3:
@@ -576,6 +577,9 @@ class cr2res_util_slit_curv_sky(PyRecipe, CR2RES_RECIPE):
         elif self.wl_set == "L3426":
             if self.chip == 2 and self.order == 2:
                 peaks = []
+        elif self.wl_set == "M4318":
+            if self.chip == 1 and self.order == 3:
+                peaks = peaks[peaks > 400]
 
         if self.plot:
             plt.clf()
