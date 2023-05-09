@@ -42,6 +42,11 @@ if __name__ == "__main__":
         # ex_orders = np.sort([int(n[:2]) for n in ex_hdu[ext].data.names if n[-4:] == "SPEC"])
         orders = np.unique(mapping_sky[mapping_sky["CHIP"] == chip]["ORDER"])
 
+        diffs = []
+        diffs_std = []
+        diffs_values = []
+        diffs_x = []
+
         for order in tqdm(orders):
             mf_idx_star = (mapping_star["CHIP"] == chip) & (mapping_star["ORDER"] == order)
             mf_idx_star = mf_hdu_star[1].data["chip"] == mapping_star["MOLECFIT"][mf_idx_star][0]
@@ -66,6 +71,10 @@ if __name__ == "__main__":
 
             mf_diff = np.abs(mf_wave_sky - mf_wave_star)
             max_diff = np.nanmax(mf_diff[mask_sky & mask_star])
+            diffs += [np.nanmean(mf_diff[mask_sky & mask_star])]
+            diffs_std += [np.nanstd(mf_diff[mask_sky & mask_star])]
+            diffs_values += [mf_diff[mask_sky & mask_star]]
+            diffs_x += [np.linspace(order-0.5, order+0.5, mf_diff.size)[mask_sky & mask_star]]
 
             plt.clf()
             ax = plt.subplot(211)
@@ -79,8 +88,21 @@ if __name__ == "__main__":
             plt.legend()
             plt.suptitle(f"CHIP: {chip} ORDER: {order:02} DIFF: {max_diff:.2} nm")
             outname = f"cr2res_wave_molecfit_c{chip}_o{order:02}.png"
-            print(f"Saving plot: {outname}")
+            tqdm.write(f"Saving plot: {outname}")
             plt.savefig(outname, dpi=600)
 
             pass
+
+        plt.clf()
+        plt.errorbar(orders, diffs, diffs_std, fmt="+")
+        for x, v in zip(diffs_x, diffs_values):
+            plt.plot(x, v)
+        plt.ylim(0, 0.1)
+        plt.xlabel("Order")
+        plt.ylabel(r"$\Delta\lambda$ [nm]")
+        plt.title(f"Detector: {chip}")
+
+        outname = f"cr2res_wave_molecfit_c{chip}.png"
+        tqdm.write(f"Saving plot: {outname}")
+        plt.savefig(outname)
 
