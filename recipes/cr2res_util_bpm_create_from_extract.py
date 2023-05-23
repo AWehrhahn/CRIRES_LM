@@ -1,3 +1,6 @@
+"""
+Create a BPM using an extracted model
+"""
 import sys
 from os.path import dirname
 from typing import Any, Dict
@@ -18,8 +21,8 @@ class cr2res_util_bpm_create_from_extract(PyRecipe, CR2RES_RECIPE):
     _author = "Ansgar Wehrhahn"
     _email = "ansgar.wehrhahn@astro.su.se"
     _copyright = "GPL-3.0-or-later"
-    _synopsis = "Create a BPM using the median absolute deviation within each order"
-    _description = "Create a BPM using the median absolute deviation within each order"
+    _synopsis = "Create a BPM using an extracted model"
+    _description = "Create a BPM using an extracted model"
 
     def __init__(self) -> None:
         super().__init__()

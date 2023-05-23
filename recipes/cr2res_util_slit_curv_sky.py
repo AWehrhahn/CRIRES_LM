@@ -1,3 +1,6 @@
+"""
+Determine the slit curvature from a sky observation
+"""
 import sys
 from os.path import basename, dirname
 from typing import Any, Dict

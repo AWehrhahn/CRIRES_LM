@@ -1,4 +1,6 @@
-
+"""
+Apply wavelength calibration from molecfit to extracted spectra
+"""
 import sys
 from os.path import basename, dirname
 from typing import Any, Dict
@@ -18,8 +20,8 @@ class cr2res_wave_molecfit_apply(PyRecipe, CR2RES_RECIPE):
     _author = "Ansgar Wehrhahn"
     _email = "ansgar.wehrhahn@astro.su.se"
     _copyright = "GPL-3.0-or-later"
-    _synopsis = "Prepare data for molecfit"
-    _description = "This recipe formats the CRIRES+ data into a format that is suitable for Molecfit"
+    _synopsis = "Apply wavelength calibration from molecfit to extracted spectra"
+    _description = "This recipe formats the Molecfit wavelength calibration back into a CRIRES+ spectrum"
 
     SKY = "SKY"
     STAR = "STAR"

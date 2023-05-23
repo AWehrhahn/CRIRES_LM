@@ -1,3 +1,6 @@
+"""
+Prepare data for molecfit
+"""
 import sys
 from os.path import dirname
 from typing import Any, Dict

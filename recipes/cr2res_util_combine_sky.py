@@ -1,5 +1,8 @@
 import sys
 from os.path import dirname
+"""
+Combine two nodding positions to get a 'sky' observation
+"""
 from typing import Any, Dict
 
 import numpy as np

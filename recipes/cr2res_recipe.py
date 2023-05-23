@@ -1,3 +1,7 @@
+"""
+Shared functionality for the pyesorex recipes.
+This is not actually a recipe itself.
+"""
 import contextlib
 import sys
 from os.path import exists

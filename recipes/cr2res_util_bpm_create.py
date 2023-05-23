@@ -1,3 +1,6 @@
+"""
+Create a BPM using the median absolute deviation within each order
+"""
 import sys
 from os.path import dirname
 from typing import Any, Dict
