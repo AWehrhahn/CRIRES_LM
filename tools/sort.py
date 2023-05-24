@@ -1,3 +1,6 @@
+"""
+Sort the CRIRES+ raw files into dates and settings based on their ESO archive XML files
+"""
 import argparse
 import os
 import re
