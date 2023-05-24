@@ -19,5 +19,5 @@ for ((i=0;i<$length;i++)) do
     wl=${settings[$i * 3 + 1]}
     exp=${settings[$i * 3 + 2]}
     echo $day\_$wl
-    python make_sof.py $wl -r=$folder/$day\_$wl/raw -o=$folder/$day\_$wl/extr -e=$exp
+    python prepare_pipeline.py $wl -r=$folder/$day\_$wl/raw -o=$folder/$day\_$wl/extr -e=$exp
 done
