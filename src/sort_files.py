@@ -22,7 +22,7 @@ if len(sys.argv) > 1:
 else:
     cwd = dirname(__file__)
     src = join(cwd, "raw")
-    dst = join(cwd, "{date}_{setting}", "raw")
+    dst = join(cwd)
 
 xml_files = glob(join(src, "*.xml"))
 
@@ -42,7 +42,7 @@ for file in tqdm(xml_files, desc="XML"):
         if wl_set is not None:
             break
 
-    dir_name = dst.format(date=names[0][-28:-18], setting=wl_set)
+    dir_name = join(dst, f"{names[0][-28:-18]}_{wl_set}", "raw")
     os.makedirs(dir_name, exist_ok=True)
     for name in tqdm(names, leave=False, desc="Files"):
         shutil.copyfile(name, join(dir_name, basename(name)))
