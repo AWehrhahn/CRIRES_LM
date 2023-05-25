@@ -44,7 +44,7 @@ python prepare_pipeline.py L3262 /scratch/ptah/anwe5599/CRIRES/2022-11-29_L3262/
 With all parts in place we can then run the data reduction pipeline. For this we simply call the `reduce_cals.sh` script that was generated in the previous step. It will be located in the specified output directory (i.e. here: /scratch/ptah/anwe5599/CRIRES/2022-11-29_L3262/extr). This will then call all the necessary recipes and scripts to make the data reduction work. For the sake of explanation we will go through the steps here.
 
 ## Calibrations
-The first steps are to create the master dark and master flat files based on the calibrations. These are then used to create bad pixel maps for the observations. The bad pixels maps are especially important for us, since the sky emission spectra are more easily influenced by strong outliers. This uses the recipes: `cr2re_cal_dark`, `cr2res_util_calib`, `cr2res_util_bpm_create`, and `cr2res_util_bpm_merge`.
+The first steps are to create the master dark and master flat files based on the calibrations. These are then used to create bad pixel maps for the observations. The bad pixels maps are especially important for us, since the sky emission spectra are more easily influenced by strong outliers than the stellar spectrum. We use the a local median filter to find outliers in the dark, the flat, and the science observation. Additionally we use the mean and standard deviation within the whole order in the master dark to find additional bad pixels. Finally we also reject the bottom 50 pixels in each detector, as those don't receive light, but the order traces could still extend into these pixels. This uses the recipes: `cr2re_cal_dark`, `cr2res_util_calib`, `cr2res_util_bpm_create`, and `cr2res_util_bpm_merge`.
 
 ![cr2res_util_trace](https://github.com/AWehrhahn/CRIRES_LM/assets/31626864/6ca8bdea-136e-44f9-911e-8fcd32705197)
 
@@ -56,12 +56,16 @@ The next step is to combine all observations of each of the two nodding position
 
 
 ## Creating a sky emission spectrum
-Using the two nodding positions, we can remove the stellar spectrum and obtain a pure sky observation. This then uses half of the pixels from the A position and half the pixels from the B position.
+Using the two nodding positions, we can remove the stellar spectrum and obtain a pure sky observation. This then uses half of the pixels from the A position and half the pixels from the B position. It works assuming that the sky above and below the star is the same and does not change significantly during the entire observation. This uses the `cr2res_util_combine_sky` recipe.
 
 ![cr2res_util_combine](https://github.com/AWehrhahn/CRIRES_LM/assets/31626864/df9cf880-b434-4ee6-93a4-3953a6a91924)
 
 ## Slit Curvature
-With this sky observation we can then extract the sky emission spectrum and determine the slit curvature, since the sky spectrum fills the entire slit. This is done using the new `cr2res_util_slit_curv_sky` recipe, which works similarly to the existing slit curvature recipe from the CRIRES+ pipeline. It first finds all peaks in the spectrum and then fits a curvature to each of those lines. It then fits a 2D polynomial to all the lines to make sure there is a smooth transition in slit curvature. Here we unfortunately have to remove some parts of the spectrum as they are not fit well. The exact ranges can be found in the recipe.
+With this sky observation we can then extract the sky emission spectrum and determine the slit curvature, since the sky spectrum fills the entire slit. This is done using the new `cr2res_util_slit_curv_sky` recipe, which works similarly to the existing slit curvature recipe from the CRIRES+ pipeline. It first finds all peaks in the spectrum and then fits a curvature to each of those lines.
+
+![cr2res_util_slit_curv_sky_single](https://github.com/AWehrhahn/CRIRES_LM/assets/31626864/892b65d6-8e7f-40f6-8b8f-300df9b679a2)
+
+It then fits a 2D polynomial to all the lines to make sure there is a smooth transition in slit curvature. Here we unfortunately have to remove some parts of the spectrum as they are not fit well. The exact ranges can be found in the recipe.
 
 ![cr2res_util_slit_curv](https://github.com/AWehrhahn/CRIRES_LM/assets/31626864/b586dee7-7ab8-47c3-b702-7c64639d72ac)
 
